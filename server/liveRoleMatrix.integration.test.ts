@@ -84,11 +84,13 @@ describeWithLiveData("live API role matrix — temporary identities are removed"
       await expect(manager.reviews.list(listInput)).resolves.toMatchObject({ page: 1 });
       await expect(manager.reviews.list({ ...listInput, fiscalYearId: isolationYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.reviews.formOptions({ fiscalYearId: openYear.id })).resolves.toMatchObject({ operationTypes: expect.any(Array) });
+      await expect(manager.reviews.editOptions({ id: actualReview.id })).resolves.toMatchObject({ fiscalYearId: openYear.id, operationTypes: expect.any(Array), employees: expect.any(Array) });
       await expect(employee.reviews.list(listInput)).resolves.toMatchObject({ items: [], total: 0 });
       await expect(employee.reviews.get({ id: actualReview.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(manager.users.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.users.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(employee.reviews.formOptions({ fiscalYearId: openYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(employee.reviews.editOptions({ id: actualReview.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.reviews.changeStatus({ id: actualReview.id, side: "employee", toStatusId: 2_147_483_647 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     } finally {
       if (isolationYearId) await db.delete(fiscalYears).where(eq(fiscalYears.id, isolationYearId));

@@ -257,7 +257,7 @@ export const customFields = mysqlTable("custom_fields", {
   id: int("id").autoincrement().primaryKey(),
   key: varchar("key", { length: 80 }).notNull().unique(),
   label: varchar("label", { length: 160 }).notNull(),
-  type: mysqlEnum("type", ["text", "number", "date", "select", "boolean"]).notNull(),
+  type: mysqlEnum("type", ["text", "textarea", "number", "currency", "date", "email", "url", "select", "multi_select", "boolean", "employee", "user", "reviewer_status", "employee_status"]).notNull(),
   helpText: text("helpText"),
   isRequired: boolean("isRequired").default(false).notNull(),
   isActive: boolean("isActive").default(true).notNull(),

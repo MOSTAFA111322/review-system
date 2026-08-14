@@ -1,0 +1,1 @@
+ALTER TABLE `custom_fields` MODIFY COLUMN `type` enum('text','textarea','number','currency','date','email','url','select','multi_select','boolean','employee','user','reviewer_status','employee_status') NOT NULL;

@@ -164,6 +164,20 @@ export const reviewsRouter = router({
     return { operationTypes: types, reviewerStatuses: reviewerStates, employeeStatuses: employeeStates, employees: assignableEmployees };
   }),
 
+  editOptions: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REVIEWS_UPDATE);
+    const db = await database();
+    const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
+    if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
+    await enforceReviewVisibility(ctx.user, review);
+    const [types, assignableEmployees] = await Promise.all([
+      db.select({ id: operationTypes.id, name: operationTypes.name, color: operationTypes.color }).from(operationTypes).where(eq(operationTypes.isActive, true)).orderBy(asc(operationTypes.sortOrder), asc(operationTypes.name)),
+      db.select({ id: employees.id, displayName: employees.displayName, department: employees.department }).from(employees).where(eq(employees.isActive, true)).orderBy(asc(employees.displayName)),
+    ]);
+    return { fiscalYearId: review.fiscalYearId, operationTypes: types, employees: assignableEmployees };
+  }),
+
   list: protectedProcedure.input(reviewListInput).query(async ({ ctx, input }) => {
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, false);
     const db = await database();

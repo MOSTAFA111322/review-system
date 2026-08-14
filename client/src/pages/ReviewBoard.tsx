@@ -105,12 +105,73 @@ function QueryError({ onRetry }: { onRetry: () => void }) { return <div role="al
 
 function CreateReviewDialog({ open, onOpenChange, fiscalYearId, onCreated }: { open: boolean; onOpenChange: (open: boolean) => void; fiscalYearId: number; onCreated: () => void }) {
   const options = trpc.reviews.formOptions.useQuery({ fiscalYearId }, { enabled: open });
-  const create = trpc.reviews.create.useMutation({ onSuccess: result => { toast.success(`تم إنشاء المراجعة ${result.internalRef}`); onCreated(); onOpenChange(false); } });
   const [draft, setDraft] = useState({ title: "", voucherNumber: "", operationTypeId: "", reviewerStatusId: "", employeeStatusId: "", assignedEmployeeId: "none", priority: "normal" as "normal" | "urgent" | "critical", dueDate: "", problem: "", requiredAction: "", description: "" });
+  const customDefinitions = trpc.customFields.forOperation.useQuery({ fiscalYearId, operationTypeId: Math.max(1, Number(draft.operationTypeId) || 1) }, { enabled: open && Boolean(draft.operationTypeId) });
+  const [customValues, setCustomValues] = useState<Record<number, unknown>>({});
+  const create = trpc.reviews.create.useMutation();
+  const saveCustomValues = trpc.customFields.values.set.useMutation();
   useEffect(() => { if (open && options.data) setDraft(current => ({ ...current, operationTypeId: current.operationTypeId || String(options.data.operationTypes[0]?.id ?? ""), reviewerStatusId: current.reviewerStatusId || String(options.data.reviewerStatuses[0]?.id ?? ""), employeeStatusId: current.employeeStatusId || String(options.data.employeeStatuses[0]?.id ?? "") })); }, [open, options.data]);
   const update = (key: keyof typeof draft, value: string) => setDraft(current => ({ ...current, [key]: value }));
-  const submit = () => { if (!draft.title || !draft.operationTypeId || !draft.reviewerStatusId || !draft.employeeStatusId) { toast.error("يرجى استكمال الحقول الإلزامية."); return; } create.mutate({ fiscalYearId, title: draft.title, voucherNumber: draft.voucherNumber || null, operationTypeId: Number(draft.operationTypeId), reviewerStatusId: Number(draft.reviewerStatusId), employeeStatusId: Number(draft.employeeStatusId), assignedEmployeeId: draft.assignedEmployeeId === "none" ? null : Number(draft.assignedEmployeeId), priority: draft.priority, dueDate: draft.dueDate || null, problem: draft.problem || null, requiredAction: draft.requiredAction || null, description: draft.description || null }); };
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent dir="rtl" className="max-h-[92vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>إنشاء عملية مراجعة</DialogTitle><DialogDescription>سيُنشأ رقم مراجعة داخلي تلقائي عند الحفظ.</DialogDescription></DialogHeader>{options.isLoading ? <div className="h-64 animate-pulse rounded-xl bg-slate-100" /> : <div className="grid gap-4 py-3 md:grid-cols-2"><Field label="عنوان المراجعة *" className="md:col-span-2"><Input value={draft.title} onChange={event => update("title", event.target.value)} placeholder="مثال: مراجعة مستندات الصرف" /></Field><Field label="رقم السند"><Input value={draft.voucherNumber} onChange={event => update("voucherNumber", event.target.value)} /></Field><Field label="التاريخ المستهدف"><Input type="date" value={draft.dueDate} onChange={event => update("dueDate", event.target.value)} /></Field><Field label="نوع العملية *"><NativeSelect value={draft.operationTypeId} onChange={value => update("operationTypeId", value)} options={options.data?.operationTypes ?? []} /></Field><Field label="الأولوية *"><select value={draft.priority} onChange={event => update("priority", event.target.value)} className="field-select"><option value="normal">عادية</option><option value="urgent">مستعجلة</option><option value="critical">عاجلة</option></select></Field><Field label="حالة المراجع *"><NativeSelect value={draft.reviewerStatusId} onChange={value => update("reviewerStatusId", value)} options={options.data?.reviewerStatuses ?? []} /></Field><Field label="حالة الموظف *"><NativeSelect value={draft.employeeStatusId} onChange={value => update("employeeStatusId", value)} options={options.data?.employeeStatuses ?? []} /></Field><Field label="الموظف المكلّف"><select value={draft.assignedEmployeeId} onChange={event => update("assignedEmployeeId", event.target.value)} className="field-select"><option value="none">دون تكليف حاليًا</option>{options.data?.employees.map(employee => <option key={employee.id} value={employee.id}>{employee.displayName}{employee.department ? ` — ${employee.department}` : ""}</option>)}</select></Field><div /><Field label="المشكلة" className="md:col-span-2"><Textarea value={draft.problem} onChange={event => update("problem", event.target.value)} placeholder="وصف المشكلة أو الملاحظة محل المراجعة" /></Field><Field label="المطلوب" className="md:col-span-2"><Textarea value={draft.requiredAction} onChange={event => update("requiredAction", event.target.value)} placeholder="الإجراء المطلوب من الموظف" /></Field><Field label="تفاصيل إضافية" className="md:col-span-2"><Textarea value={draft.description} onChange={event => update("description", event.target.value)} /></Field><div className="flex justify-end gap-2 pt-2 md:col-span-2"><Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button><Button disabled={create.isPending} onClick={submit} className="bg-blue-700 hover:bg-blue-800">{create.isPending ? "جارٍ الحفظ…" : "إنشاء المراجعة"}<ArrowLeft className="mr-1 h-4 w-4" /></Button></div></div>}</DialogContent></Dialog>;
+  const submit = async () => {
+    if (!draft.title || !draft.operationTypeId || !draft.reviewerStatusId || !draft.employeeStatusId) { toast.error("يرجى استكمال الحقول الإلزامية."); return; }
+    const missingCustom = (customDefinitions.data ?? []).some(field => {
+      const value = customValues[field.id];
+      return field.isRequired && (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0));
+    });
+    if (missingCustom) { toast.error("يرجى تعبئة الحقول المخصصة الإلزامية."); return; }
+    try {
+      const result = await create.mutateAsync({ fiscalYearId, title: draft.title, voucherNumber: draft.voucherNumber || null, operationTypeId: Number(draft.operationTypeId), reviewerStatusId: Number(draft.reviewerStatusId), employeeStatusId: Number(draft.employeeStatusId), assignedEmployeeId: draft.assignedEmployeeId === "none" ? null : Number(draft.assignedEmployeeId), priority: draft.priority, dueDate: draft.dueDate || null, problem: draft.problem || null, requiredAction: draft.requiredAction || null, description: draft.description || null });
+      if (customDefinitions.data?.length) {
+        await saveCustomValues.mutateAsync({
+          reviewId: result.id,
+          values: customDefinitions.data.map(field => ({ customFieldId: field.id, value: customValues[field.id] ?? null })),
+        });
+      }
+      toast.success(`تم إنشاء المراجعة ${result.internalRef}`); onCreated(); onOpenChange(false); setCustomValues({});
+    } catch (error) { toast.error(error instanceof Error ? error.message : "تعذر إنشاء المراجعة."); }
+  };
+  const pending = create.isPending || saveCustomValues.isPending;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="max-h-[92vh] max-w-3xl overflow-y-auto">
+        <DialogHeader><DialogTitle>إنشاء عملية مراجعة</DialogTitle><DialogDescription>سيُنشأ رقم مراجعة داخلي تلقائي عند الحفظ، وتظهر الحقول الإضافية حسب نوع المهمة.</DialogDescription></DialogHeader>
+        {options.isLoading ? <div className="h-64 animate-pulse rounded-xl bg-slate-100" /> : (
+          <div className="grid gap-4 py-3 md:grid-cols-2">
+            <Field label="عنوان المراجعة *" className="md:col-span-2"><Input value={draft.title} onChange={event => update("title", event.target.value)} placeholder="مثال: مراجعة مستندات الصرف" /></Field>
+            <Field label="رقم السند"><Input value={draft.voucherNumber} onChange={event => update("voucherNumber", event.target.value)} /></Field>
+            <Field label="التاريخ المستهدف"><Input type="date" value={draft.dueDate} onChange={event => update("dueDate", event.target.value)} /></Field>
+            <Field label="نوع العملية *"><NativeSelect value={draft.operationTypeId} onChange={value => { update("operationTypeId", value); setCustomValues({}); }} options={options.data?.operationTypes ?? []} /></Field>
+            <Field label="الأولوية *"><select value={draft.priority} onChange={event => update("priority", event.target.value)} className="field-select"><option value="normal">عادية</option><option value="urgent">مستعجلة</option><option value="critical">عاجلة</option></select></Field>
+            <Field label="حالة المراجع *"><NativeSelect value={draft.reviewerStatusId} onChange={value => update("reviewerStatusId", value)} options={options.data?.reviewerStatuses ?? []} /></Field>
+            <Field label="حالة الموظف *"><NativeSelect value={draft.employeeStatusId} onChange={value => update("employeeStatusId", value)} options={options.data?.employeeStatuses ?? []} /></Field>
+            <Field label="الموظف المكلّف"><select value={draft.assignedEmployeeId} onChange={event => update("assignedEmployeeId", event.target.value)} className="field-select"><option value="none">دون تكليف حاليًا</option>{options.data?.employees.map(employee => <option key={employee.id} value={employee.id}>{employee.displayName}{employee.department ? ` — ${employee.department}` : ""}</option>)}</select></Field>
+            <div />
+            {customDefinitions.isLoading ? <div className="h-16 animate-pulse rounded-xl bg-slate-100 md:col-span-2" /> : customDefinitions.data?.map(field => <CreateCustomField key={field.id} field={field} value={customValues[field.id]} onChange={(value: unknown) => setCustomValues(current => ({ ...current, [field.id]: value }))} />)}
+            <Field label="المشكلة" className="md:col-span-2"><Textarea value={draft.problem} onChange={event => update("problem", event.target.value)} placeholder="وصف المشكلة أو الملاحظة محل المراجعة" /></Field>
+            <Field label="المطلوب" className="md:col-span-2"><Textarea value={draft.requiredAction} onChange={event => update("requiredAction", event.target.value)} placeholder="الإجراء المطلوب من الموظف" /></Field>
+            <Field label="تفاصيل إضافية" className="md:col-span-2"><Textarea value={draft.description} onChange={event => update("description", event.target.value)} /></Field>
+            <div className="flex justify-end gap-2 pt-2 md:col-span-2"><Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button><Button disabled={pending} onClick={submit} className="bg-blue-700 hover:bg-blue-800">{pending ? "جارٍ الحفظ…" : "إنشاء المراجعة"}<ArrowLeft className="mr-1 h-4 w-4" /></Button></div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 }
-function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) { return <div className={`grid gap-2 ${className}`}><Label className="text-right text-sm font-semibold text-slate-700">{label}</Label>{children}</div>; }
+
+type CreateFieldDefinition = { id: number; label: string; type: "text" | "textarea" | "number" | "currency" | "date" | "email" | "url" | "select" | "multi_select" | "boolean" | "employee" | "user" | "reviewer_status" | "employee_status"; helpText: string | null; isRequired: boolean; options: Array<{ label: string; value: string }>; referenceOptions: Array<{ id: number; label: string | null }> };
+
+function CreateCustomField({ field, value, onChange }: { field: CreateFieldDefinition; value: unknown; onChange: (value: unknown) => void }) {
+  const label = `${field.label}${field.isRequired ? " *" : ""}`;
+  const scalarValue = typeof value === "string" || typeof value === "number" ? String(value) : "";
+  const choices = field.type === "select" || field.type === "multi_select" ? field.options.map(option => ({ value: option.value, label: option.label })) : field.referenceOptions.map(option => ({ value: String(option.id), label: option.label || `#${option.id}` }));
+  if (field.type === "boolean") return <Field label={label} className="md:col-span-2"><label className="flex min-h-10 items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm text-slate-700"><input type="checkbox" checked={value === true} onChange={event => onChange(event.target.checked)} />{field.helpText || "حدد هذا الخيار عند انطباقه."}</label></Field>;
+  if (field.type === "textarea") return <Field label={label} help={field.helpText} className="md:col-span-2"><Textarea value={scalarValue} onChange={event => onChange(event.target.value)} /></Field>;
+  if (field.type === "multi_select") {
+    const selected = Array.isArray(value) ? value.map(String) : [];
+    return <Field label={label} help={field.helpText} className="md:col-span-2"><div className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-2">{choices.map(choice => <label key={choice.value} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={selected.includes(choice.value)} onChange={event => onChange(event.target.checked ? [...selected, choice.value] : selected.filter(item => item !== choice.value))} />{choice.label}</label>)}</div></Field>;
+  }
+  if (field.type === "select" || field.type === "employee" || field.type === "user" || field.type === "reviewer_status" || field.type === "employee_status") return <Field label={label} help={field.helpText}><select value={scalarValue} onChange={event => onChange(event.target.value || null)} className="field-select"><option value="">اختر قيمة</option>{choices.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></Field>;
+  return <Field label={label} help={field.helpText}><Input type={field.type === "currency" || field.type === "number" ? "number" : field.type} value={scalarValue} onChange={event => onChange(event.target.value)} /></Field>;
+}
+function Field({ label, help, children, className = "" }: { label: string; help?: string | null; children: React.ReactNode; className?: string }) { return <div className={`grid gap-2 ${className}`}><Label className="text-right text-sm font-semibold text-slate-700">{label}</Label>{help ? <p className="text-xs text-slate-500">{help}</p> : null}{children}</div>; }
 function NativeSelect({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: Array<{ id: number; name: string }> }) { return <select value={value} onChange={event => onChange(event.target.value)} className="field-select"><option value="" disabled>اختر…</option>{options.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select>; }

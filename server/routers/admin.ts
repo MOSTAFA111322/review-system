@@ -106,12 +106,19 @@ export const employeesRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
     const db = await database();
-    return db.select().from(employees).where(eq(employees.isActive, true));
+    return db.select().from(employees).orderBy(employees.displayName);
   }),
   create: protectedProcedure.input(z.object({ displayName: z.string().trim().min(2).max(180), email: z.string().email().optional(), department: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
     const db = await database();
     const result = await db.insert(employees).values(input);
     return { id: Number(result[0].insertId) };
+  }),
+  update: protectedProcedure.input(z.object({ id: z.number().int().positive(), displayName: z.string().trim().min(2).max(180).optional(), email: z.string().email().nullable().optional(), department: z.string().trim().max(160).nullable().optional(), isActive: z.boolean().optional() })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const { id, ...changes } = input;
+    await db.update(employees).set(changes).where(eq(employees.id, id));
+    return { success: true };
   }),
 });

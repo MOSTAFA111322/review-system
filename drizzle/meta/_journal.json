@@ -15,6 +15,13 @@
       "when": 1786715072283,
       "tag": "0001_jittery_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786721678052,
+      "tag": "0002_sticky_agent_brand",
+      "breakpoints": true
     }
   ]
 }

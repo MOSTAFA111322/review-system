@@ -3,14 +3,16 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { extname } from "node:path";
 import { z } from "zod";
-import { attachments, customFieldOptions, customFields, customFieldValues, notifications, operationTypeFields, operationTypes, reviewActivityLog, reviews, users } from "../../drizzle/schema";
+import { attachments, customFieldOptions, customFields, customFieldValues, employeeStatuses, employees, notifications, operationTypeFields, operationTypes, reviewerStatuses, reviewActivityLog, reviews, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission } from "../rbac";
 import { storageGetSignedUrl, storagePut } from "../storage";
 import { protectedProcedure, router } from "../_core/trpc";
 import { enforceReviewVisibility } from "./reviews";
 
-const fieldType = z.enum(["text", "number", "date", "select", "boolean"]);
+const fieldType = z.enum(["text", "textarea", "number", "currency", "date", "email", "url", "select", "multi_select", "boolean", "employee", "user", "reviewer_status", "employee_status"]);
+const optionFieldTypes = new Set(["select", "multi_select"]);
+const referenceFieldTypes = new Set(["employee", "user", "reviewer_status", "employee_status"]);
 const allowedMimeTypes = new Set([
   "application/pdf", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -67,6 +69,25 @@ export const customFieldsRouter = router({
     return fields.map(field => ({ ...field, options: options.filter(option => option.customFieldId === field.id), operationTypes: mappings.filter(mapping => mapping.customFieldId === field.id) }));
   }),
 
+  forOperation: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive(), operationTypeId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REVIEWS_CREATE);
+    await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
+    const db = await database();
+    const rows = await db.select({ field: customFields, isRequiredOverride: operationTypeFields.isRequiredOverride }).from(operationTypeFields).innerJoin(customFields, eq(operationTypeFields.customFieldId, customFields.id)).where(and(eq(operationTypeFields.operationTypeId, input.operationTypeId), eq(customFields.isActive, true))).orderBy(asc(operationTypeFields.sortOrder), asc(customFields.sortOrder));
+    const ids = rows.map(row => row.field.id);
+    if (!ids.length) return [];
+    const fieldTypes = new Set(rows.map(row => row.field.type));
+    const [options, employeeRows, userRows, reviewerStatusRows, employeeStatusRows] = await Promise.all([
+      db.select().from(customFieldOptions).where(and(inArray(customFieldOptions.customFieldId, ids), eq(customFieldOptions.isActive, true))).orderBy(asc(customFieldOptions.sortOrder)),
+      fieldTypes.has("employee") ? db.select({ id: employees.id, label: employees.displayName }).from(employees).where(eq(employees.isActive, true)).orderBy(asc(employees.displayName)) : Promise.resolve([]),
+      fieldTypes.has("user") ? db.select({ id: users.id, label: users.name }).from(users).where(eq(users.isActive, true)).orderBy(asc(users.name)) : Promise.resolve([]),
+      fieldTypes.has("reviewer_status") ? db.select({ id: reviewerStatuses.id, label: reviewerStatuses.name }).from(reviewerStatuses).where(eq(reviewerStatuses.isActive, true)).orderBy(asc(reviewerStatuses.sortOrder)) : Promise.resolve([]),
+      fieldTypes.has("employee_status") ? db.select({ id: employeeStatuses.id, label: employeeStatuses.name }).from(employeeStatuses).where(eq(employeeStatuses.isActive, true)).orderBy(asc(employeeStatuses.sortOrder)) : Promise.resolve([]),
+    ]);
+    const referenceOptions: Record<string, Array<{ id: number; label: string | null }>> = { employee: employeeRows, user: userRows, reviewer_status: reviewerStatusRows, employee_status: employeeStatusRows };
+    return rows.map(({ field, isRequiredOverride }) => ({ ...field, isRequired: isRequiredOverride ?? field.isRequired, options: options.filter(option => option.customFieldId === field.id), referenceOptions: referenceOptions[field.type] ?? [] }));
+  }),
+
   create: protectedProcedure.input(z.object({ key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,79}$/), label: z.string().trim().min(2).max(160), type: fieldType, helpText: z.string().trim().max(1000).nullable().optional(), isRequired: z.boolean().default(false), sortOrder: z.number().int().min(0).max(10000).default(0) })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.SETTINGS_MANAGE);
     const db = await database();
@@ -93,7 +114,7 @@ export const customFieldsRouter = router({
     await requirePermission(ctx.user, PERMISSIONS.SETTINGS_MANAGE);
     const db = await database();
     const [field] = await db.select().from(customFields).where(eq(customFields.id, input.customFieldId)).limit(1);
-    if (!field || field.type !== "select") throw new TRPCError({ code: "BAD_REQUEST", message: "الخيارات متاحة للحقول من نوع قائمة فقط." });
+    if (!field || !optionFieldTypes.has(field.type)) throw new TRPCError({ code: "BAD_REQUEST", message: "الخيارات متاحة للحقول من نوع قائمة أو اختيارات متعددة فقط." });
     await db.transaction(async tx => {
       await tx.delete(customFieldOptions).where(eq(customFieldOptions.customFieldId, input.customFieldId));
       if (input.options.length) await tx.insert(customFieldOptions).values(input.options.map(option => ({ ...option, customFieldId: input.customFieldId })));
@@ -118,11 +139,18 @@ export const customFieldsRouter = router({
       const fields = await db.select({ id: customFields.id, key: customFields.key, label: customFields.label, type: customFields.type, helpText: customFields.helpText, isRequired: customFields.isRequired, isRequiredOverride: operationTypeFields.isRequiredOverride, sortOrder: operationTypeFields.sortOrder }).from(operationTypeFields).innerJoin(customFields, eq(operationTypeFields.customFieldId, customFields.id)).where(and(eq(operationTypeFields.operationTypeId, review.operationTypeId), eq(customFields.isActive, true))).orderBy(asc(operationTypeFields.sortOrder));
       if (!fields.length) return [];
       const ids = fields.map(field => field.id);
-      const [values, options] = await Promise.all([
+      const optionFieldIds = fields.filter(field => optionFieldTypes.has(field.type)).map(field => field.id);
+      const referenceTypes = new Set(fields.filter(field => referenceFieldTypes.has(field.type)).map(field => field.type));
+      const [values, options, employeeRows, userRows, reviewerStatusRows, employeeStatusRows] = await Promise.all([
         db.select().from(customFieldValues).where(and(eq(customFieldValues.reviewId, review.id), inArray(customFieldValues.customFieldId, ids))),
-        db.select().from(customFieldOptions).where(and(inArray(customFieldOptions.customFieldId, ids), eq(customFieldOptions.isActive, true))).orderBy(asc(customFieldOptions.sortOrder)),
+        optionFieldIds.length ? db.select().from(customFieldOptions).where(and(inArray(customFieldOptions.customFieldId, optionFieldIds), eq(customFieldOptions.isActive, true))).orderBy(asc(customFieldOptions.sortOrder)) : Promise.resolve([]),
+        referenceTypes.has("employee") ? db.select({ id: employees.id, label: employees.displayName }).from(employees).where(eq(employees.isActive, true)).orderBy(asc(employees.displayName)) : Promise.resolve([]),
+        referenceTypes.has("user") ? db.select({ id: users.id, label: users.name }).from(users).where(eq(users.isActive, true)).orderBy(asc(users.name)) : Promise.resolve([]),
+        referenceTypes.has("reviewer_status") ? db.select({ id: reviewerStatuses.id, label: reviewerStatuses.name }).from(reviewerStatuses).where(eq(reviewerStatuses.isActive, true)).orderBy(asc(reviewerStatuses.sortOrder)) : Promise.resolve([]),
+        referenceTypes.has("employee_status") ? db.select({ id: employeeStatuses.id, label: employeeStatuses.name }).from(employeeStatuses).where(eq(employeeStatuses.isActive, true)).orderBy(asc(employeeStatuses.sortOrder)) : Promise.resolve([]),
       ]);
-      return fields.map(field => ({ ...field, isRequired: field.isRequiredOverride ?? field.isRequired, value: values.find(value => value.customFieldId === field.id)?.value ?? null, options: options.filter(option => option.customFieldId === field.id) }));
+      const referenceOptions: Record<string, Array<{ id: number; label: string | null }>> = { employee: employeeRows, user: userRows, reviewer_status: reviewerStatusRows, employee_status: employeeStatusRows };
+      return fields.map(field => ({ ...field, isRequired: field.isRequiredOverride ?? field.isRequired, value: values.find(value => value.customFieldId === field.id)?.value ?? null, options: options.filter(option => option.customFieldId === field.id), referenceOptions: referenceOptions[field.type] ?? [] }));
     }),
     set: protectedProcedure.input(z.object({ reviewId: z.number().int().positive(), values: z.array(z.object({ customFieldId: z.number().int().positive(), value: z.unknown() })).max(100) })).mutation(async ({ ctx, input }) => {
       await requirePermission(ctx.user, PERMISSIONS.REVIEWS_UPDATE);
@@ -132,7 +160,7 @@ export const customFieldsRouter = router({
       const definitionById = new Map(definitions.map(field => [field.id, field]));
       const valuesById = new Map(input.values.map(value => [value.customFieldId, value.value]));
       if (valuesById.size !== input.values.length || input.values.some(value => !definitionById.has(value.customFieldId))) throw new TRPCError({ code: "BAD_REQUEST", message: "أحد الحقول المخصصة غير مرتبط بنوع هذه المراجعة." });
-      const selectFieldIds = definitions.filter(field => field.type === "select").map(field => field.id);
+      const selectFieldIds = definitions.filter(field => optionFieldTypes.has(field.type)).map(field => field.id);
       const selectOptions = selectFieldIds.length ? await db.select({ customFieldId: customFieldOptions.customFieldId, value: customFieldOptions.value }).from(customFieldOptions).where(and(inArray(customFieldOptions.customFieldId, selectFieldIds), eq(customFieldOptions.isActive, true))) : [];
       const activeSelectValues = new Map<number, Set<string>>();
       for (const option of selectOptions) {
@@ -140,17 +168,43 @@ export const customFieldsRouter = router({
         values.add(option.value);
         activeSelectValues.set(option.customFieldId, values);
       }
+      const validReferenceIds = new Map<string, Set<number>>();
+      const referenceTypes = new Set(definitions.filter(field => referenceFieldTypes.has(field.type)).map(field => field.type));
+      const [employeeRows, userRows, reviewerStatusRows, employeeStatusRows] = await Promise.all([
+        referenceTypes.has("employee") ? db.select({ id: employees.id }).from(employees).where(eq(employees.isActive, true)) : Promise.resolve([]),
+        referenceTypes.has("user") ? db.select({ id: users.id }).from(users).where(eq(users.isActive, true)) : Promise.resolve([]),
+        referenceTypes.has("reviewer_status") ? db.select({ id: reviewerStatuses.id }).from(reviewerStatuses).where(eq(reviewerStatuses.isActive, true)) : Promise.resolve([]),
+        referenceTypes.has("employee_status") ? db.select({ id: employeeStatuses.id }).from(employeeStatuses).where(eq(employeeStatuses.isActive, true)) : Promise.resolve([]),
+      ]);
+      validReferenceIds.set("employee", new Set(employeeRows.map(item => item.id)));
+      validReferenceIds.set("user", new Set(userRows.map(item => item.id)));
+      validReferenceIds.set("reviewer_status", new Set(reviewerStatusRows.map(item => item.id)));
+      validReferenceIds.set("employee_status", new Set(employeeStatusRows.map(item => item.id)));
       for (const field of definitions) {
         const value = valuesById.get(field.id);
         const required = field.isRequiredOverride ?? field.isRequired;
-        if (required && (value === null || value === undefined || value === "")) throw new TRPCError({ code: "BAD_REQUEST", message: "يرجى تعبئة جميع الحقول المخصصة الإلزامية." });
-        if (value === null || value === undefined || value === "") continue;
-        const valid = (field.type === "text" || field.type === "select") ? typeof value === "string" : field.type === "number" ? typeof value === "number" && Number.isFinite(value) : field.type === "date" ? typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) : typeof value === "boolean";
+        const empty = value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
+        if (required && empty) throw new TRPCError({ code: "BAD_REQUEST", message: "يرجى تعبئة جميع الحقول المخصصة الإلزامية." });
+        if (empty) continue;
+        const valid = (["text", "textarea", "select"] as string[]).includes(field.type) ? typeof value === "string" && String(value).length <= 10_000
+          : ["number", "currency"].includes(field.type) ? typeof value === "number" && Number.isFinite(value)
+          : field.type === "date" ? typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+          : field.type === "email" ? typeof value === "string" && z.string().email().safeParse(value).success
+          : field.type === "url" ? typeof value === "string" && z.string().url().safeParse(value).success
+          : field.type === "multi_select" ? Array.isArray(value) && value.length <= 100 && value.every(item => typeof item === "string")
+          : field.type === "boolean" ? typeof value === "boolean"
+          : referenceFieldTypes.has(field.type) ? typeof value === "number" && Number.isInteger(value) && validReferenceIds.get(field.type)?.has(value)
+          : false;
         if (!valid) throw new TRPCError({ code: "BAD_REQUEST", message: "قيمة أحد الحقول المخصصة لا تطابق نوع الحقل." });
         if (field.type === "select" && !activeSelectValues.get(field.id)?.has(String(value))) throw new TRPCError({ code: "BAD_REQUEST", message: "القيمة المحددة غير متاحة ضمن خيارات هذا الحقل." });
+        if (field.type === "multi_select" && !(value as string[]).every(item => activeSelectValues.get(field.id)?.has(item))) throw new TRPCError({ code: "BAD_REQUEST", message: "أحد الاختيارات لم يعد متاحًا ضمن خيارات هذا الحقل." });
       }
+      const isEmptyValue = (value: unknown) => value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
       await db.transaction(async tx => {
-        for (const entry of input.values) await tx.insert(customFieldValues).values({ reviewId: review.id, customFieldId: entry.customFieldId, value: entry.value }).onDuplicateKeyUpdate({ set: { value: entry.value } });
+        for (const entry of input.values) {
+          if (isEmptyValue(entry.value)) await tx.delete(customFieldValues).where(and(eq(customFieldValues.reviewId, review.id), eq(customFieldValues.customFieldId, entry.customFieldId)));
+          else await tx.insert(customFieldValues).values({ reviewId: review.id, customFieldId: entry.customFieldId, value: entry.value }).onDuplicateKeyUpdate({ set: { value: entry.value } });
+        }
       });
       await db.insert(reviewActivityLog).values({ reviewId: review.id, actorUserId: ctx.user.id, action: "customFields.updated" });
       return { success: true };
