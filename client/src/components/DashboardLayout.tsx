@@ -46,7 +46,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-700 text-white shadow-lg shadow-blue-700/25"><ClipboardCheck className="h-7 w-7" /></div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">نظام المراجعة</h1>
           <p className="mt-3 leading-7 text-slate-500">سجّل دخولك للوصول إلى عمليات المراجعة المكلّف بها وصلاحيات فريقك.</p>
-          <Button onClick={() => startLogin()} size="lg" className="mt-7 w-full bg-blue-700 hover:bg-blue-800">تسجيل الدخول</Button>
+          <Button onClick={() => window.location.assign("/login")} size="lg" className="mt-7 w-full bg-blue-700 hover:bg-blue-800">تسجيل الدخول</Button>
+          <Button variant="outline" onClick={() => startLogin()} className="mt-3 w-full">الدخول عبر Manus OAuth</Button>
         </section>
       </main>
     );

@@ -24,6 +24,15 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
+  /** اسم مستخدم داخلي اختياري؛ تستمر حسابات OAuth بلا اسم مستخدم محلي. */
+  username: varchar("username", { length: 64 }).unique(),
+  /** تجزئة scrypt فقط؛ لا تُخزَّن كلمة المرور الأصلية مطلقًا. */
+  passwordHash: varchar("passwordHash", { length: 512 }),
+  passwordChangedAt: timestamp("passwordChangedAt"),
+  /** يرفع عند إعادة التعيين أو التعطيل لإبطال الجلسات المحلية السابقة. */
+  sessionVersion: int("sessionVersion").default(1).notNull(),
+  failedLoginCount: int("failedLoginCount").default(0).notNull(),
+  loginLockedUntil: timestamp("loginLockedUntil"),
   /** دور المنصة الأساسي؛ صلاحيات النظام التفصيلية محفوظة في userRoles. */
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   isActive: boolean("isActive").default(true).notNull(),

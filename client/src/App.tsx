@@ -13,6 +13,7 @@ import ReviewDetail from "./pages/ReviewDetail";
 import ReviewEdit from "./pages/ReviewEdit";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
+import Login from "./pages/Login";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/reports" component={Reports} />
       <Route path="/settings" component={Settings} />
       <Route path="/users" component={Users} />
+      <Route path="/login" component={Login} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
