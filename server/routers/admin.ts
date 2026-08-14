@@ -1,0 +1,117 @@
+import { TRPCError } from "@trpc/server";
+import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+import { employees, fiscalYears, permissions, rolePermissions, roles, userFiscalYears, userRoles, users } from "../../drizzle/schema";
+import { ensureInitialFiscalYear, ensureInitialWorkflowConfiguration, ensureSystemConfiguration, getRoleByCode } from "../bootstrap";
+import { getDb } from "../db";
+import { PERMISSIONS, requirePermission } from "../rbac";
+import { protectedProcedure, router } from "../_core/trpc";
+
+async function database() {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة حاليًا." });
+  return db;
+}
+
+export const setupRouter = router({
+  status: protectedProcedure.query(async ({ ctx }) => {
+    const db = await database();
+    const [roleCount] = await db.select({ count: roles.id }).from(roles);
+    return { isPlatformAdmin: ctx.user.role === "admin", configured: Boolean(roleCount?.count) };
+  }),
+  bootstrap: protectedProcedure.mutation(async ({ ctx }) => {
+    if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "تهيئة النظام الأولية متاحة لمدير النظام فقط." });
+    await ensureSystemConfiguration();
+    await ensureInitialFiscalYear(ctx.user.id);
+    await ensureInitialWorkflowConfiguration();
+    const systemAdmin = await getRoleByCode("system_admin");
+    const db = await database();
+    if (systemAdmin) {
+      await db.insert(userRoles).values({ userId: ctx.user.id, roleId: systemAdmin.id, assignedByUserId: ctx.user.id }).onDuplicateKeyUpdate({ set: { roleId: systemAdmin.id } });
+    }
+    return { success: true };
+  }),
+});
+
+export const usersRouter = router({
+  list: protectedProcedure.query(async ({ ctx }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const records = await db.select({ id: users.id, name: users.name, email: users.email, isActive: users.isActive, lastSignedIn: users.lastSignedIn, platformRole: users.role }).from(users);
+    const assignedRoles = await db.select({ userId: userRoles.userId, roleName: roles.name, roleCode: roles.code }).from(userRoles).innerJoin(roles, eq(userRoles.roleId, roles.id));
+    const byUser = new Map<number, { name: string; code: string }[]>();
+    for (const role of assignedRoles) byUser.set(role.userId, [...(byUser.get(role.userId) ?? []), { name: role.roleName, code: role.roleCode }]);
+    return records.map(user => ({ ...user, roles: byUser.get(user.id) ?? [] }));
+  }),
+  setActive: protectedProcedure.input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    if (input.userId === ctx.user.id && !input.isActive) throw new TRPCError({ code: "BAD_REQUEST", message: "لا يمكنك تعطيل حسابك الحالي." });
+    const db = await database();
+    await db.update(users).set({ isActive: input.isActive }).where(eq(users.id, input.userId));
+    return { success: true };
+  }),
+  setRoles: protectedProcedure.input(z.object({ userId: z.number().int().positive(), roleIds: z.array(z.number().int().positive()).max(8) })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const selected = input.roleIds.length ? await db.select({ id: roles.id }).from(roles).where(and(inArray(roles.id, input.roleIds), eq(roles.isActive, true))) : [];
+    if (selected.length !== input.roleIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "تتضمن القائمة دورًا غير صالح أو معطلًا." });
+    await db.transaction(async tx => {
+      await tx.delete(userRoles).where(eq(userRoles.userId, input.userId));
+      if (input.roleIds.length) await tx.insert(userRoles).values(input.roleIds.map(roleId => ({ userId: input.userId, roleId, assignedByUserId: ctx.user.id })));
+    });
+    return { success: true };
+  }),
+  setFiscalYears: protectedProcedure.input(z.object({ userId: z.number().int().positive(), fiscalYearIds: z.array(z.number().int().positive()).max(50) })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const selected = input.fiscalYearIds.length ? await db.select({ id: fiscalYears.id }).from(fiscalYears).where(inArray(fiscalYears.id, input.fiscalYearIds)) : [];
+    if (selected.length !== input.fiscalYearIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "تتضمن القائمة سنة مالية غير صالحة." });
+    await db.transaction(async tx => {
+      await tx.delete(userFiscalYears).where(eq(userFiscalYears.userId, input.userId));
+      if (input.fiscalYearIds.length) await tx.insert(userFiscalYears).values(input.fiscalYearIds.map(fiscalYearId => ({ userId: input.userId, fiscalYearId })));
+    });
+    return { success: true };
+  }),
+});
+
+export const rolesRouter = router({
+  list: protectedProcedure.query(async ({ ctx }) => {
+    await requirePermission(ctx.user, PERMISSIONS.ROLES_MANAGE);
+    const db = await database();
+    const roleRows = await db.select().from(roles);
+    const links = await db.select({ roleId: rolePermissions.roleId, permissionId: rolePermissions.permissionId }).from(rolePermissions);
+    return roleRows.map(role => ({ ...role, permissionIds: links.filter(link => link.roleId === role.id).map(link => link.permissionId) }));
+  }),
+  permissions: protectedProcedure.query(async ({ ctx }) => {
+    await requirePermission(ctx.user, PERMISSIONS.ROLES_MANAGE);
+    const db = await database();
+    return db.select().from(permissions);
+  }),
+  setPermissions: protectedProcedure.input(z.object({ roleId: z.number().int().positive(), permissionIds: z.array(z.number().int().positive()).max(50) })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.ROLES_MANAGE);
+    const db = await database();
+    const [role] = await db.select().from(roles).where(eq(roles.id, input.roleId)).limit(1);
+    if (!role) throw new TRPCError({ code: "NOT_FOUND", message: "الدور غير موجود." });
+    const selected = input.permissionIds.length ? await db.select({ id: permissions.id }).from(permissions).where(inArray(permissions.id, input.permissionIds)) : [];
+    if (selected.length !== input.permissionIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "تتضمن القائمة صلاحية غير صالحة." });
+    await db.transaction(async tx => {
+      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, input.roleId));
+      if (input.permissionIds.length) await tx.insert(rolePermissions).values(input.permissionIds.map(permissionId => ({ roleId: input.roleId, permissionId })));
+    });
+    return { success: true };
+  }),
+});
+
+export const employeesRouter = router({
+  list: protectedProcedure.query(async ({ ctx }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    return db.select().from(employees).where(eq(employees.isActive, true));
+  }),
+  create: protectedProcedure.input(z.object({ displayName: z.string().trim().min(2).max(180), email: z.string().email().optional(), department: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const result = await db.insert(employees).values(input);
+    return { id: Number(result[0].insertId) };
+  }),
+});

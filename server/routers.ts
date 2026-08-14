@@ -1,28 +1,31 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { router } from "./_core/trpc";
+import { employeesRouter, rolesRouter, setupRouter, usersRouter } from "./routers/admin";
+import { analyticsRouter } from "./routers/analytics";
+import { authRouter } from "./routers/auth";
+import { activityRouter, commentsRouter } from "./routers/collaboration";
+import { attachmentsRouter, customFieldsRouter, notificationsRouter } from "./routers/extendedFeatures";
+import { fiscalYearsRouter } from "./routers/fiscalYears";
+import { reviewsRouter } from "./routers/reviews";
+import { settingsRouter } from "./routers/settings";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
-  auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
-    }),
-  }),
-
-  // TODO: add feature routers here, e.g.
-  // todo: router({
-  //   list: protectedProcedure.query(({ ctx }) =>
-  //     db.getUserTodos(ctx.user.id)
-  //   ),
-  // }),
+  auth: authRouter,
+  setup: setupRouter,
+  fiscalYears: fiscalYearsRouter,
+  users: usersRouter,
+  roles: rolesRouter,
+  employees: employeesRouter,
+  settings: settingsRouter,
+  reviews: reviewsRouter,
+  comments: commentsRouter,
+  activity: activityRouter,
+  attachments: attachmentsRouter,
+  customFields: customFieldsRouter,
+  notifications: notificationsRouter,
+  analytics: analyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;
