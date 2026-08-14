@@ -28,4 +28,10 @@ describe("غلاف صفحة إدارة المستخدمين", () => {
     expect(usersPage).toContain('role="alert"');
     expect(usersPage).not.toContain("{createLocal.error.message}");
   });
+
+  it("لا يفرض اتجاهًا لاتينيًا على اسم المستخدم الذي يدعم العربية واللاتينية", () => {
+    expect(usersPage).toContain('id="local-username" dir="auto"');
+    expect(usersPage).toContain('<p dir="auto" className="mt-1 text-xs text-slate-500">{account.username');
+    expect(homePage).not.toContain('id="username" dir="ltr"');
+  });
 });

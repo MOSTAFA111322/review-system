@@ -51,7 +51,7 @@ export default function Login() {
             <CardHeader className="px-0 pt-0"><CardTitle className="text-2xl text-slate-900">تسجيل الدخول</CardTitle><CardDescription className="mt-2 leading-6">استخدم اسم المستخدم وكلمة المرور المخصصة لك.</CardDescription></CardHeader>
             <CardContent className="px-0 pb-0">
               <form className="space-y-5" onSubmit={submit}>
-                <div className="space-y-2"><Label htmlFor="username">اسم المستخدم</Label><Input id="username" autoComplete="username" dir="ltr" value={username} onChange={event => setUsername(event.target.value)} placeholder="مثال: أحمد.مراجعة" required /></div>
+                <div className="space-y-2"><Label htmlFor="username">اسم المستخدم</Label><Input id="username" autoComplete="username" dir="auto" value={username} onChange={event => setUsername(event.target.value)} placeholder="مثال: أحمد.مراجعة" required /></div>
                 <div className="space-y-2"><Label htmlFor="password">كلمة المرور</Label><Input id="password" type="password" autoComplete="current-password" dir="ltr" value={password} onChange={event => setPassword(event.target.value)} required /></div>
                 {error ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{error}</p> : null}
                 <Button type="submit" size="lg" className="w-full bg-blue-700 hover:bg-blue-800" disabled={localLogin.isPending}>{localLogin.isPending ? "جارٍ التحقق…" : <><KeyRound className="h-4 w-4" />دخول آمن</>}</Button>
