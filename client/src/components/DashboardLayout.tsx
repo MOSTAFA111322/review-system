@@ -22,9 +22,10 @@ import {
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
-import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
+import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
+import { useTheme } from "../contexts/ThemeContext";
 
 const navigation = [
   { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/" },
@@ -56,6 +57,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
 function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const utils = trpc.useUtils();
   const notifications = trpc.notifications.list.useQuery({ unreadOnly: false });
   const markNotificationRead = trpc.notifications.markRead.useMutation({ onSuccess: () => utils.notifications.list.invalidate() });
@@ -120,7 +122,12 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
               <h2 className="text-base font-bold text-slate-800">{activeItem?.label ?? "نظام المراجعة"}</h2>
             </div>
           </div>
-          <DropdownMenu><DropdownMenuTrigger asChild><button aria-label="الإشعارات" className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50"><Bell className="h-[18px] w-[18px]" />{unreadCount ? <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-700 px-1 text-[9px] font-bold text-white">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}</button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-80 p-2 text-right"><div dir="rtl"><p className="px-2 py-2 text-sm font-bold text-slate-800">الإشعارات</p>{notifications.isLoading ? <p className="px-2 py-3 text-sm text-slate-500">جارٍ التحميل…</p> : notifications.data?.length ? notifications.data.slice(0, 6).map(item => <DropdownMenuItem key={item.id} onSelect={() => { if (!item.readAt) markNotificationRead.mutate({ id: item.id }); if (item.link) setLocation(item.link); }} className={`block cursor-pointer whitespace-normal rounded-lg px-2 py-2.5 ${item.readAt ? "opacity-70" : "bg-blue-50/70"}`}><p className="text-sm font-semibold text-slate-700">{item.title}</p>{item.body ? <p className="mt-1 text-xs leading-5 text-slate-500">{item.body}</p> : null}</DropdownMenuItem>) : <p className="px-2 py-4 text-sm text-slate-500">لا توجد إشعارات جديدة.</p>}</div></DropdownMenuContent></DropdownMenu>
+          <div className="flex items-center gap-2">
+            <button onClick={toggleTheme} aria-label={theme === "dark" ? "تفعيل الوضع النهاري" : "تفعيل الوضع الليلي"} title={theme === "dark" ? "الوضع النهاري" : "الوضع الليلي"} className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+              {theme === "dark" ? <Sun className="h-[18px] w-[18px] text-amber-300" /> : <Moon className="h-[18px] w-[18px]" />}
+            </button>
+            <DropdownMenu><DropdownMenuTrigger asChild><button aria-label="الإشعارات" className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50"><Bell className="h-[18px] w-[18px]" />{unreadCount ? <span className="absolute left-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-700 px-1 text-[9px] font-bold text-white">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}</button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-80 p-2 text-right"><div dir="rtl"><p className="px-2 py-2 text-sm font-bold text-slate-800">الإشعارات</p>{notifications.isLoading ? <p className="px-2 py-3 text-sm text-slate-500">جارٍ التحميل…</p> : notifications.data?.length ? notifications.data.slice(0, 6).map(item => <DropdownMenuItem key={item.id} onSelect={() => { if (!item.readAt) markNotificationRead.mutate({ id: item.id }); if (item.link) setLocation(item.link); }} className={`block cursor-pointer whitespace-normal rounded-lg px-2 py-2.5 ${item.readAt ? "opacity-70" : "bg-blue-50/70"}`}><p className="text-sm font-semibold text-slate-700">{item.title}</p>{item.body ? <p className="mt-1 text-xs leading-5 text-slate-500">{item.body}</p> : null}</DropdownMenuItem>) : <p className="px-2 py-4 text-sm text-slate-500">لا توجد إشعارات جديدة.</p>}</div></DropdownMenuContent></DropdownMenu>
+          </div>
         </header>
         <main className="min-h-[calc(100vh-5rem)] p-4 md:p-7">{children}</main>
       </SidebarInset>

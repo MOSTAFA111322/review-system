@@ -111,6 +111,7 @@
   --sidebar-accent-foreground:  oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.488 0.243 264.376);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -188,5 +189,81 @@
       padding-right: 2rem;
       max-width: 1280px; /* Standard content width */
     }
+  }
+}
+
+/* طبقة توافق للوحات الواجهة التي تستخدم ألوان Slate الصريحة. */
+.dark .bg-white,
+.dark .bg-white\/85,
+.dark .bg-white\/90 {
+  background-color: oklch(0.21 0.006 285.885) !important;
+}
+
+.dark .bg-\[\#f7f9fc\],
+.dark .bg-slate-50,
+.dark .bg-slate-50\/70 {
+  background-color: oklch(0.165 0.008 285.9) !important;
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-50\/70 {
+  background-color: oklch(0.26 0.04 258 / 0.58) !important;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-200\/80,
+.dark .divide-slate-100,
+.dark .divide-slate-200 {
+  border-color: oklch(1 0 0 / 12%) !important;
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600 {
+  color: oklch(0.91 0.008 286) !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400 {
+  color: oklch(0.74 0.014 286) !important;
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: oklch(0.27 0.008 286) !important;
+}
+
+.dark .field-select,
+.dark input,
+.dark textarea {
+  border-color: oklch(1 0 0 / 15%);
+  background-color: oklch(0.18 0.007 286);
+  color: oklch(0.91 0.008 286);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: oklch(0.64 0.014 286);
+}
+
+.dark .recharts-text,
+.dark .recharts-label {
+  fill: oklch(0.78 0.012 286);
+}
+
+.dark .recharts-cartesian-grid line {
+  stroke: oklch(1 0 0 / 12%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dark body,
+  .dark [class*="bg-"],
+  .dark [class*="text-"],
+  .dark [class*="border-"] {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
   }
 }

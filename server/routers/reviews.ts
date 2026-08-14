@@ -5,6 +5,7 @@ import { z } from "zod";
 import { employeeStatuses, employees, fiscalYears, notifications, operationTypes, reviewActivityLog, reviewerStatuses, reviews, statusTransitions } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
+import { completedAtForTransition } from "../reviewRules";
 import { protectedProcedure, router } from "../_core/trpc";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -83,7 +84,7 @@ async function notifyAssignedEmployee(reviewId: number, internalRef: string, tit
   await db.insert(notifications).values({ userId: employee.userId, type: "review.assigned", title: "تم تكليفك بمراجعة", body: `${internalRef} — ${title}`, link: `/reviews/${reviewId}` });
 }
 
-const listInput = z.object({
+export const reviewListInput = z.object({
   fiscalYearId: z.number().int().positive(),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(5).max(100).default(20),
@@ -99,7 +100,44 @@ const listInput = z.object({
   sortDirection: z.enum(["asc", "desc"]).default("desc"),
 });
 
+/** تُنشئ الخطة الموحدة التي يستخدمها مسار القائمة قبل ترجمتها إلى شروط Drizzle. */
+export function buildReviewListPlan(input: z.infer<typeof reviewListInput>) {
+  return {
+    fiscalYearId: input.fiscalYearId,
+    page: input.page,
+    pageSize: input.pageSize,
+    offset: (input.page - 1) * input.pageSize,
+    queryTerm: input.query ? `%${input.query.replace(/[\\%_]/g, "\\$&")}%` : undefined,
+    operationTypeIds: input.operationTypeIds,
+    reviewerStatusIds: input.reviewerStatusIds,
+    employeeStatusIds: input.employeeStatusIds,
+    priorities: input.priorities,
+    assignedEmployeeId: input.assignedEmployeeId,
+    dueFrom: toDate(input.dueFrom),
+    dueTo: toDate(input.dueTo),
+    sortBy: input.sortBy,
+    sortDirection: input.sortDirection,
+  };
+}
+
 export const reviewsRouter = router({
+  availableTransitions: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    const db = await database();
+    const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
+    if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    await enforceReviewVisibility(ctx.user, review);
+    const [reviewerTransitions, employeeTransitions] = await Promise.all([
+      db.select({ id: statusTransitions.id, toStatusId: reviewerStatuses.id, name: reviewerStatuses.name, color: reviewerStatuses.color, isTerminal: reviewerStatuses.isTerminal, requiredPermission: statusTransitions.requiredPermission })
+        .from(statusTransitions).innerJoin(reviewerStatuses, eq(statusTransitions.toReviewerStatusId, reviewerStatuses.id))
+        .where(and(eq(statusTransitions.side, "reviewer"), eq(statusTransitions.fromReviewerStatusId, review.reviewerStatusId), eq(statusTransitions.isActive, true), eq(reviewerStatuses.isActive, true))),
+      db.select({ id: statusTransitions.id, toStatusId: employeeStatuses.id, name: employeeStatuses.name, color: employeeStatuses.color, isTerminal: employeeStatuses.isTerminal, requiredPermission: statusTransitions.requiredPermission })
+        .from(statusTransitions).innerJoin(employeeStatuses, eq(statusTransitions.toEmployeeStatusId, employeeStatuses.id))
+        .where(and(eq(statusTransitions.side, "employee"), eq(statusTransitions.fromEmployeeStatusId, review.employeeStatusId), eq(statusTransitions.isActive, true), eq(employeeStatuses.isActive, true))),
+    ]);
+    const reviewer = (await Promise.all(reviewerTransitions.map(async item => ((await userHasPermission(ctx.user, item.requiredPermission)) ? item : undefined)))).filter((item): item is (typeof reviewerTransitions)[number] => item !== undefined);
+    const employee = (await Promise.all(employeeTransitions.map(async item => ((await userHasPermission(ctx.user, item.requiredPermission)) ? item : undefined)))).filter((item): item is (typeof employeeTransitions)[number] => item !== undefined);
+    return { reviewer, employee };
+  }),
   filterOptions: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive() })).query(async ({ ctx, input }) => {
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, false);
     const db = await database();
@@ -126,31 +164,31 @@ export const reviewsRouter = router({
     return { operationTypes: types, reviewerStatuses: reviewerStates, employeeStatuses: employeeStates, employees: assignableEmployees };
   }),
 
-  list: protectedProcedure.input(listInput).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(reviewListInput).query(async ({ ctx, input }) => {
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, false);
     const db = await database();
-    const conditions: SQL[] = [eq(reviews.fiscalYearId, input.fiscalYearId), isNull(reviews.deletedAt)];
+    const plan = buildReviewListPlan(input);
+    const conditions: SQL[] = [eq(reviews.fiscalYearId, plan.fiscalYearId), isNull(reviews.deletedAt)];
     const canViewAll = await userHasPermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ALL);
     if (!canViewAll) {
       await requirePermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ASSIGNED);
       const employee = await getEmployeeForUser(ctx.user.id);
-      if (!employee) return { items: [], total: 0, page: input.page, pageSize: input.pageSize, totalPages: 0 };
+      if (!employee) return { items: [], total: 0, page: plan.page, pageSize: plan.pageSize, totalPages: 0 };
       conditions.push(eq(reviews.assignedEmployeeId, employee.id));
     }
-    if (input.query) {
-      const term = `%${input.query.replace(/[\\%_]/g, "\\$&")}%`;
-      conditions.push(or(like(reviews.internalRef, term), like(reviews.title, term), like(reviews.voucherNumber, term))!);
+    if (plan.queryTerm) {
+      conditions.push(or(like(reviews.internalRef, plan.queryTerm), like(reviews.title, plan.queryTerm), like(reviews.voucherNumber, plan.queryTerm))!);
     }
-    if (input.operationTypeIds?.length) conditions.push(inArray(reviews.operationTypeId, input.operationTypeIds));
-    if (input.reviewerStatusIds?.length) conditions.push(inArray(reviews.reviewerStatusId, input.reviewerStatusIds));
-    if (input.employeeStatusIds?.length) conditions.push(inArray(reviews.employeeStatusId, input.employeeStatusIds));
-    if (input.priorities?.length) conditions.push(inArray(reviews.priority, input.priorities));
-    if (input.assignedEmployeeId) conditions.push(eq(reviews.assignedEmployeeId, input.assignedEmployeeId));
-    if (input.dueFrom) conditions.push(gte(reviews.dueDate, toDate(input.dueFrom)!));
-    if (input.dueTo) conditions.push(lte(reviews.dueDate, toDate(input.dueTo)!));
+    if (plan.operationTypeIds?.length) conditions.push(inArray(reviews.operationTypeId, plan.operationTypeIds));
+    if (plan.reviewerStatusIds?.length) conditions.push(inArray(reviews.reviewerStatusId, plan.reviewerStatusIds));
+    if (plan.employeeStatusIds?.length) conditions.push(inArray(reviews.employeeStatusId, plan.employeeStatusIds));
+    if (plan.priorities?.length) conditions.push(inArray(reviews.priority, plan.priorities));
+    if (plan.assignedEmployeeId) conditions.push(eq(reviews.assignedEmployeeId, plan.assignedEmployeeId));
+    if (plan.dueFrom) conditions.push(gte(reviews.dueDate, plan.dueFrom));
+    if (plan.dueTo) conditions.push(lte(reviews.dueDate, plan.dueTo));
     const where = and(...conditions);
-    const sortColumn = { createdAt: reviews.createdAt, dueDate: reviews.dueDate, internalRef: reviews.internalRef, priority: reviews.priority }[input.sortBy];
-    const ordering = input.sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn);
+    const sortColumn = { createdAt: reviews.createdAt, dueDate: reviews.dueDate, internalRef: reviews.internalRef, priority: reviews.priority }[plan.sortBy];
+    const ordering = plan.sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn);
     const [result, counted] = await Promise.all([
       db.select({
         id: reviews.id, internalRef: reviews.internalRef, voucherNumber: reviews.voucherNumber, title: reviews.title, priority: reviews.priority, dueDate: reviews.dueDate, createdAt: reviews.createdAt,
@@ -158,11 +196,11 @@ export const reviewsRouter = router({
         reviewerStatusId: reviews.reviewerStatusId, reviewerStatusName: reviewerStatuses.name, reviewerStatusColor: reviewerStatuses.color,
         employeeStatusId: reviews.employeeStatusId, employeeStatusName: employeeStatuses.name, employeeStatusColor: employeeStatuses.color,
         assignedEmployeeId: reviews.assignedEmployeeId, assignedEmployeeName: employees.displayName,
-      }).from(reviews).innerJoin(operationTypes, eq(reviews.operationTypeId, operationTypes.id)).innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id)).innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id)).leftJoin(employees, eq(reviews.assignedEmployeeId, employees.id)).where(where).orderBy(ordering).limit(input.pageSize).offset((input.page - 1) * input.pageSize),
+      }).from(reviews).innerJoin(operationTypes, eq(reviews.operationTypeId, operationTypes.id)).innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id)).innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id)).leftJoin(employees, eq(reviews.assignedEmployeeId, employees.id)).where(where).orderBy(ordering).limit(plan.pageSize).offset(plan.offset),
       db.select({ count: sql<number>`count(*)` }).from(reviews).where(where),
     ]);
     const total = Number(counted[0]?.count ?? 0);
-    return { items: result, total, page: input.page, pageSize: input.pageSize, totalPages: Math.ceil(total / input.pageSize) };
+    return { items: result, total, page: plan.page, pageSize: plan.pageSize, totalPages: Math.ceil(total / plan.pageSize) };
   }),
 
   get: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {
@@ -297,7 +335,7 @@ export const reviewsRouter = router({
     const otherStatus = input.side === "reviewer"
       ? await db.select({ isTerminal: employeeStatuses.isTerminal }).from(employeeStatuses).where(eq(employeeStatuses.id, review.employeeStatusId)).limit(1)
       : await db.select({ isTerminal: reviewerStatuses.isTerminal }).from(reviewerStatuses).where(eq(reviewerStatuses.id, review.reviewerStatusId)).limit(1);
-    const completedAt = target[0].isTerminal && otherStatus[0]?.isTerminal ? new Date() : null;
+    const completedAt = completedAtForTransition(target[0].isTerminal, Boolean(otherStatus[0]?.isTerminal));
     const change = input.side === "reviewer" ? { reviewerStatusId: input.toStatusId } : { employeeStatusId: input.toStatusId };
     await db.update(reviews).set({ ...change, completedAt, updatedByUserId: ctx.user.id }).where(eq(reviews.id, input.id));
     await createActivity(input.id, ctx.user.id, `review.status.${input.side}.changed`, input.side === "reviewer" ? "reviewerStatusId" : "employeeStatusId", input.side === "reviewer" ? review.reviewerStatusId : review.employeeStatusId, input.toStatusId);

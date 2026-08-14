@@ -64,6 +64,13 @@ export async function requirePermission(user: User, permission: PermissionCode |
   if (!(await userHasPermission(user, permission))) forbidden();
 }
 
+/** قاعدة موحدة تمنع جميع تغييرات البيانات في السنة المالية المغلقة. */
+export function assertFiscalYearWritable(status: "open" | "closed"): void {
+  if (status === "closed") {
+    throw new TRPCError({ code: "CONFLICT", message: "السنة المالية مغلقة ولا تقبل أي تعديل." });
+  }
+}
+
 /** يفرض عزل السنوات. لا يتجاوز الحارس مدير المنصة إلا بعد التأكد من وجود السنة. */
 export async function requireFiscalYearAccess(user: User, fiscalYearId: number, write = false) {
   const db = await getDb();
@@ -81,9 +88,7 @@ export async function requireFiscalYearAccess(user: User, fiscalYearId: number, 
     if (granted.length === 0) forbidden("ليس لديك نطاق وصول إلى هذه السنة المالية.");
   }
 
-  if (write && year.status === "closed") {
-    throw new TRPCError({ code: "CONFLICT", message: "السنة المالية مغلقة ولا تقبل أي تعديل." });
-  }
+  if (write) assertFiscalYearWritable(year.status);
 
   return year;
 }

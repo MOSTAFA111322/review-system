@@ -98,6 +98,8 @@ const employeeStatusesRouter = router({
   }),
 });
 
+export const transitionInput = z.object({ side: z.enum(["reviewer", "employee"]), fromStatusId: z.number().int().positive(), toStatusId: z.number().int().positive(), requiredPermission: z.string().min(3).max(100) });
+
 const transitionsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     await requireSettingsPermission(ctx.user);
@@ -109,7 +111,7 @@ const transitionsRouter = router({
     const db = await database();
     return db.select({ code: permissions.code, name: permissions.name, group: permissions.group }).from(permissions).orderBy(asc(permissions.group), asc(permissions.name));
   }),
-  create: protectedProcedure.input(z.object({ side: z.enum(["reviewer", "employee"]), fromStatusId: z.number().int().positive(), toStatusId: z.number().int().positive(), requiredPermission: z.string().min(3).max(100) })).mutation(async ({ ctx, input }) => {
+  create: protectedProcedure.input(transitionInput).mutation(async ({ ctx, input }) => {
     await requireSettingsPermission(ctx.user);
     const db = await database();
     const [permission] = await db.select({ id: permissions.id }).from(permissions).where(eq(permissions.code, input.requiredPermission)).limit(1);
