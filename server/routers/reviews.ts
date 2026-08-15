@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte, inArray, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { employeeStatuses, employees, fiscalYears, notifications, operationTypes, reviewActivityLog, reviewerStatuses, reviews, statusTransitions } from "../../drizzle/schema";
@@ -96,6 +96,7 @@ export const reviewListInput = z.object({
   assignedEmployeeId: z.number().int().positive().optional(),
   dueFrom: dateString.optional(),
   dueTo: dateString.optional(),
+  archiveScope: z.enum(["active", "archived"]).default("active"),
   sortBy: z.enum(["createdAt", "dueDate", "internalRef", "priority"]).default("createdAt"),
   sortDirection: z.enum(["asc", "desc"]).default("desc"),
 });
@@ -115,6 +116,7 @@ export function buildReviewListPlan(input: z.infer<typeof reviewListInput>) {
     assignedEmployeeId: input.assignedEmployeeId,
     dueFrom: toDate(input.dueFrom),
     dueTo: toDate(input.dueTo),
+    archiveScope: input.archiveScope,
     sortBy: input.sortBy,
     sortDirection: input.sortDirection,
   };
@@ -126,6 +128,7 @@ export const reviewsRouter = router({
     const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
     if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
     await enforceReviewVisibility(ctx.user, review);
+    if (review.archivedAt) return { reviewer: [], employee: [] };
     const [reviewerTransitions, employeeTransitions] = await Promise.all([
       db.select({ id: statusTransitions.id, toStatusId: reviewerStatuses.id, name: reviewerStatuses.name, color: reviewerStatuses.color, isTerminal: reviewerStatuses.isTerminal, requiredPermission: statusTransitions.requiredPermission })
         .from(statusTransitions).innerJoin(reviewerStatuses, eq(statusTransitions.toReviewerStatusId, reviewerStatuses.id))
@@ -169,6 +172,7 @@ export const reviewsRouter = router({
     const db = await database();
     const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
     if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    if (review.archivedAt) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن تحرير مراجعة مؤرشفة. استعدها أولًا." });
     await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
     await enforceReviewVisibility(ctx.user, review);
     const [types, assignableEmployees] = await Promise.all([
@@ -182,7 +186,11 @@ export const reviewsRouter = router({
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, false);
     const db = await database();
     const plan = buildReviewListPlan(input);
-    const conditions: SQL[] = [eq(reviews.fiscalYearId, plan.fiscalYearId), isNull(reviews.deletedAt)];
+    const conditions: SQL[] = [
+      eq(reviews.fiscalYearId, plan.fiscalYearId),
+      isNull(reviews.deletedAt),
+      plan.archiveScope === "archived" ? isNotNull(reviews.archivedAt) : isNull(reviews.archivedAt),
+    ];
     const canViewAll = await userHasPermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ALL);
     if (!canViewAll) {
       await requirePermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ASSIGNED);
@@ -205,7 +213,7 @@ export const reviewsRouter = router({
     const ordering = plan.sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn);
     const [result, counted] = await Promise.all([
       db.select({
-        id: reviews.id, internalRef: reviews.internalRef, voucherNumber: reviews.voucherNumber, title: reviews.title, priority: reviews.priority, dueDate: reviews.dueDate, createdAt: reviews.createdAt,
+        id: reviews.id, internalRef: reviews.internalRef, voucherNumber: reviews.voucherNumber, title: reviews.title, priority: reviews.priority, dueDate: reviews.dueDate, createdAt: reviews.createdAt, archivedAt: reviews.archivedAt,
         operationTypeId: reviews.operationTypeId, operationTypeName: operationTypes.name, operationTypeColor: operationTypes.color,
         reviewerStatusId: reviews.reviewerStatusId, reviewerStatusName: reviewerStatuses.name, reviewerStatusColor: reviewerStatuses.color,
         employeeStatusId: reviews.employeeStatusId, employeeStatusName: employeeStatuses.name, employeeStatusColor: employeeStatuses.color,
@@ -267,6 +275,7 @@ export const reviewsRouter = router({
     const db = await database();
     const [existing] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    if (existing.archivedAt) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن تعديل مراجعة مؤرشفة. استعدها أولًا." });
     await requireFiscalYearAccess(ctx.user, existing.fiscalYearId, true);
     await enforceReviewVisibility(ctx.user, existing);
     if (input.operationTypeId || input.reviewerStatusId || input.employeeStatusId || input.assignedEmployeeId !== undefined) {
@@ -292,6 +301,7 @@ export const reviewsRouter = router({
     const db = await database();
     const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
     if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    if (review.archivedAt) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن تعديل تكليف مراجعة مؤرشفة. استعدها أولًا." });
     await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
     if (input.employeeId) {
       const [employee] = await db.select({ id: employees.id }).from(employees).where(and(eq(employees.id, input.employeeId), eq(employees.isActive, true))).limit(1);
@@ -326,10 +336,42 @@ export const reviewsRouter = router({
     return { success: true };
   }),
 
+  archive: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REVIEWS_UPDATE);
+    const db = await database();
+    const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
+    if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    if (review.archivedAt) throw new TRPCError({ code: "CONFLICT", message: "المراجعة موجودة بالفعل في الأرشيف." });
+    await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
+    await enforceReviewVisibility(ctx.user, review);
+    const [reviewerStatus, employeeStatus] = await Promise.all([
+      db.select({ isTerminal: reviewerStatuses.isTerminal }).from(reviewerStatuses).where(eq(reviewerStatuses.id, review.reviewerStatusId)).limit(1),
+      db.select({ isTerminal: employeeStatuses.isTerminal }).from(employeeStatuses).where(eq(employeeStatuses.id, review.employeeStatusId)).limit(1),
+    ]);
+    if (!reviewerStatus[0]?.isTerminal || !employeeStatus[0]?.isTerminal) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن أرشفة المراجعة قبل اكتمال حالة المراجع وحالة الموظف." });
+    const archivedAt = new Date();
+    await db.update(reviews).set({ archivedAt, archivedByUserId: ctx.user.id, updatedByUserId: ctx.user.id }).where(eq(reviews.id, input.id));
+    await createActivity(input.id, ctx.user.id, "review.archived", "archivedAt", null, archivedAt.toISOString());
+    return { success: true, archivedAt };
+  }),
+
+  restoreFromArchive: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REVIEWS_RESTORE);
+    const db = await database();
+    const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt), isNotNull(reviews.archivedAt))).limit(1);
+    if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة المؤرشفة غير موجودة." });
+    await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
+    await enforceReviewVisibility(ctx.user, review);
+    await db.update(reviews).set({ archivedAt: null, archivedByUserId: null, updatedByUserId: ctx.user.id }).where(eq(reviews.id, input.id));
+    await createActivity(input.id, ctx.user.id, "review.unarchived", "archivedAt", review.archivedAt?.toISOString() ?? null, null);
+    return { success: true };
+  }),
+
   changeStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), side: z.enum(["reviewer", "employee"]), toStatusId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const db = await database();
     const [review] = await db.select().from(reviews).where(and(eq(reviews.id, input.id), isNull(reviews.deletedAt))).limit(1);
     if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
+    if (review.archivedAt) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن تغيير حالة مراجعة مؤرشفة. استعدها أولًا." });
     await requireFiscalYearAccess(ctx.user, review.fiscalYearId, true);
     await enforceReviewVisibility(ctx.user, review);
     if (input.side === "employee") {

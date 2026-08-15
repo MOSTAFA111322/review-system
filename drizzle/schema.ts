@@ -202,6 +202,10 @@ export const reviews = mysqlTable(
     createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
     updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
     completedAt: timestamp("completedAt"),
+    /** تاريخ نقل العملية المكتملة إلى الأرشيف؛ لا يحذف السجل أو مرفقاته. */
+    archivedAt: timestamp("archivedAt"),
+    /** المستخدم الذي نفذ الأرشفة لضمان قابلية المراجعة والاسترجاع. */
+    archivedByUserId: int("archivedByUserId").references(() => users.id, { onDelete: "set null" }),
     deletedAt: timestamp("deletedAt"),
     deletedByUserId: int("deletedByUserId").references(() => users.id, { onDelete: "set null" }),
     ...auditTimestamps,
@@ -212,6 +216,7 @@ export const reviews = mysqlTable(
     index("reviews_fy_employee_status_idx").on(table.fiscalYearId, table.employeeStatusId),
     index("reviews_fy_employee_idx").on(table.fiscalYearId, table.assignedEmployeeId),
     index("reviews_fy_deleted_created_idx").on(table.fiscalYearId, table.deletedAt, table.createdAt),
+    index("reviews_fy_archived_deleted_created_idx").on(table.fiscalYearId, table.archivedAt, table.deletedAt, table.createdAt),
     index("reviews_due_date_idx").on(table.dueDate),
   ],
 );

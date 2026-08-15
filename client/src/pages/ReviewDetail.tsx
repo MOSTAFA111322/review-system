@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Link, useRoute } from "wouter";
 
 const formatDateTime = (value: Date | string | null) => value ? new Intl.DateTimeFormat("ar-EG-u-ca-gregory", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
-const activityLabel = (action: string) => ({ "review.created": "تم إنشاء المراجعة", "review.updated": "تم تحديث بيانات المراجعة", "review.assigned": "تم تعديل التكليف", "review.deleted": "تم حذف المراجعة منطقيًا", "review.restored": "تمت استعادة المراجعة", "review.status.reviewer.changed": "تم تغيير حالة المراجع", "review.status.employee.changed": "تم تغيير حالة الموظف", "comment.created": "تمت إضافة تعليق", "comment.replied": "تمت إضافة رد" }[action] ?? action);
+const activityLabel = (action: string) => ({ "review.created": "تم إنشاء المراجعة", "review.updated": "تم تحديث بيانات المراجعة", "review.assigned": "تم تعديل التكليف", "review.deleted": "تم حذف المراجعة منطقيًا", "review.restored": "تمت استعادة المراجعة", "review.archived": "تم نقل المراجعة إلى الأرشيف", "review.unarchived": "تم استرجاع المراجعة من الأرشيف", "review.status.reviewer.changed": "تم تغيير حالة المراجع", "review.status.employee.changed": "تم تغيير حالة الموظف", "comment.created": "تمت إضافة تعليق", "comment.replied": "تمت إضافة رد" }[action] ?? action);
 
 export default function ReviewDetail() {
   const [, params] = useRoute("/reviews/:id");

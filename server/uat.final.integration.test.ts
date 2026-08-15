@@ -153,6 +153,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       await expect(outsider.reviews.get({ id: primary.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(outsider.comments.create({ reviewId: primary.id, body: "محاولة وصول غير مصرح" })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(employee.reviews.changeStatus({ id: primary.id, side: "reviewer", toStatusId: reviewerDone.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(manager.reviews.archive({ id: primary.id })).rejects.toMatchObject({ code: "CONFLICT" });
 
       await expect(manager.customFields.values.set({ reviewId: primary.id, values: [{ customFieldId: field.id, value: null }] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
       await manager.customFields.values.set({ reviewId: primary.id, values: [{ customFieldId: field.id, value: 8721 }] });
@@ -179,8 +180,18 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       expect(completed.reviewerStatusId).toBe(reviewerDone.id);
       expect(completed.employeeStatusId).toBe(employeeDone.id);
       expect(completed.completedAt).toBeTruthy();
+      await expect(employee.reviews.archive({ id: primary.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await manager.reviews.archive({ id: primary.id });
+      const activeAfterArchive = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
+      const archivedAfterArchive = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "archived", sortBy: "createdAt", sortDirection: "desc" });
+      expect(activeAfterArchive.items.some(item => item.id === primary.id)).toBe(false);
+      expect(archivedAfterArchive.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, archivedAt: expect.any(Date) })]));
+      await expect(manager.reviews.changeStatus({ id: primary.id, side: "reviewer", toStatusId: reviewerOpen.id })).rejects.toMatchObject({ code: "CONFLICT" });
+      await manager.reviews.restoreFromArchive({ id: primary.id });
+      const activeAfterRestore = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
+      expect(activeAfterRestore.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, archivedAt: null })]));
       const activity = await manager.activity.list({ reviewId: primary.id });
-      expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "customFields.updated"]));
+      expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "review.archived", "review.unarchived", "customFields.updated"]));
 
       const attachmentFixtures = [
         { fileName: `uat-${runId}.pdf`, mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF\n") },

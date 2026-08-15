@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight, CirclePlus, ClipboardList, Filter, Search, SlidersHorizontal } from "lucide-react";
+import { AlertCircle, Archive, ArrowLeft, ChevronLeft, ChevronRight, CirclePlus, ClipboardList, Filter, Search, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -35,6 +35,7 @@ export default function ReviewBoard({ fiscalYearId, fiscalYearName, isClosed }: 
   const [reviewerStatusId, setReviewerStatusId] = useState("all");
   const [employeeStatusId, setEmployeeStatusId] = useState("all");
   const [operationTypeId, setOperationTypeId] = useState("all");
+  const [archiveScope, setArchiveScope] = useState<"active" | "archived">("active");
   const [sortBy, setSortBy] = useState<"createdAt" | "dueDate" | "internalRef" | "priority">("createdAt");
   const [createOpen, setCreateOpen] = useState(false);
   const filters = useMemo(() => ({
@@ -43,8 +44,9 @@ export default function ReviewBoard({ fiscalYearId, fiscalYearName, isClosed }: 
     reviewerStatusIds: reviewerStatusId === "all" ? undefined : [Number(reviewerStatusId)],
     employeeStatusIds: employeeStatusId === "all" ? undefined : [Number(employeeStatusId)],
     operationTypeIds: operationTypeId === "all" ? undefined : [Number(operationTypeId)],
+    archiveScope,
     sortBy, sortDirection: "desc" as const,
-  }), [fiscalYearId, page, query, priority, reviewerStatusId, employeeStatusId, operationTypeId, sortBy]);
+  }), [fiscalYearId, page, query, priority, reviewerStatusId, employeeStatusId, operationTypeId, archiveScope, sortBy]);
   const list = trpc.reviews.list.useQuery(filters);
   const options = trpc.reviews.filterOptions.useQuery({ fiscalYearId });
   const resetFilters = () => { setPage(1); setQuery(""); setPriority("all"); setReviewerStatusId("all"); setEmployeeStatusId("all"); setOperationTypeId("all"); setSortBy("createdAt"); };
@@ -54,14 +56,19 @@ export default function ReviewBoard({ fiscalYearId, fiscalYearName, isClosed }: 
       <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
           <div className="mb-2 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-blue-600" /><p className="text-sm font-medium text-slate-500">{fiscalYearName}</p>{isClosed ? <Badge className="bg-slate-700">سنة مغلقة</Badge> : null}</div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 md:text-3xl">عمليات المراجعة</h1>
-          <p className="mt-2 text-sm text-slate-500">تابع الحالة والتكليفات والتواريخ المستهدفة من مكان واحد.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 md:text-3xl">{archiveScope === "archived" ? "أرشيف عمليات المراجعة" : "عمليات المراجعة"}</h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-300">{archiveScope === "archived" ? "عمليات مكتملة محفوظة بسجلها ومرفقاتها، ويمكن استرجاعها وفق الصلاحية." : "تابع الحالة والتكليفات والتواريخ المستهدفة من مكان واحد."}</p>
         </div>
-        {canCreate && !isClosed ? <Button onClick={() => setCreateOpen(true)} className="h-11 gap-2 bg-blue-700 px-5 shadow-md shadow-blue-700/20 hover:bg-blue-800"><CirclePlus className="h-4 w-4" />إنشاء مراجعة</Button> : null}
+        {canCreate && !isClosed && archiveScope === "active" ? <Button onClick={() => setCreateOpen(true)} className="h-11 gap-2 bg-blue-700 px-5 shadow-md shadow-blue-700/20 hover:bg-blue-800"><CirclePlus className="h-4 w-4" />إنشاء مراجعة</Button> : null}
+      </div>
+
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900" role="tablist" aria-label="نطاق عرض المراجعات">
+        <Button type="button" size="sm" variant={archiveScope === "active" ? "default" : "ghost"} onClick={() => { setPage(1); setArchiveScope("active"); }} className={archiveScope === "active" ? "bg-blue-700 hover:bg-blue-800" : "text-slate-600 dark:text-slate-200"}>قائمة العمل</Button>
+        <Button type="button" size="sm" variant={archiveScope === "archived" ? "default" : "ghost"} onClick={() => { setPage(1); setArchiveScope("archived"); }} className={archiveScope === "archived" ? "bg-amber-700 hover:bg-amber-800" : "gap-2 text-slate-600 dark:text-slate-200"}><Archive className="h-3.5 w-3.5" />الأرشيف</Button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Metric label="إجمالي النتائج" value={list.data?.total ?? "—"} note="حسب الفلاتر الحالية" />
+        <Metric label={archiveScope === "archived" ? "إجمالي المؤرشف" : "إجمالي النتائج"} value={list.data?.total ?? "—"} note="حسب الفلاتر الحالية" />
         <Metric label="السنة المالية" value={fiscalYearName.replace("السنة المالية ", "")} note={isClosed ? "مقفلة للتعديل" : "متاحة للتحديث"} blue />
         <Metric label="عرض القائمة" value={`${list.data?.items.length ?? 0}`} note="نتيجة في الصفحة الحالية" />
       </div>

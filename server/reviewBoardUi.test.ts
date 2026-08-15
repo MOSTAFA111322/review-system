@@ -28,4 +28,13 @@ describe("واجهة لوحة المراجعات المتجاوبة", () => {
     expect(reviewBoardSource).toContain("إعادة المحاولة");
     expect(reviewBoardSource).toContain("list.refetch()");
   });
+
+  it("يفصل قائمة العمل اليومية عن الأرشيف دون تغيير الفلاتر المالية", () => {
+    expect(reviewBoardSource).toContain('useState<"active" | "archived">("active")');
+    expect(reviewBoardSource).toContain("archiveScope,");
+    expect(reviewBoardSource).toContain('setArchiveScope("active")');
+    expect(reviewBoardSource).toContain('setArchiveScope("archived")');
+    expect(reviewBoardSource).toContain("أرشيف عمليات المراجعة");
+    expect(reviewBoardSource).toContain("قائمة العمل");
+  });
 });
