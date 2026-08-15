@@ -46,4 +46,9 @@ describe("غلاف صفحة إدارة المستخدمين", () => {
     expect(reviewBoard).toContain("bg-orange-50");
     expect(reviewBoard).toContain('className={filterControlClass}');
   });
+
+  it("يحافظ على رأس جدول المراجعات داكنًا وواضحًا بصريًا في الوضعين", () => {
+    expect(reviewBoard).toContain("bg-slate-100 text-xs font-bold tracking-wide text-slate-800 dark:bg-slate-800 dark:text-slate-100");
+    expect(reviewBoard).not.toContain("bg-slate-50/80 text-xs text-slate-500");
+  });
 });
