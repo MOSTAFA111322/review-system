@@ -52,6 +52,7 @@ async function resolveReview(user: Parameters<typeof requirePermission>[0], revi
   if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة." });
   await requireFiscalYearAccess(user, review.fiscalYearId, write);
   await enforceReviewVisibility(user, review);
+  if (write && review.cancelledAt) throw new TRPCError({ code: "CONFLICT", message: "لا يمكن تعديل مراجعة ملغاة. استعدها أولًا." });
   return review;
 }
 

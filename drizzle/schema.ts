@@ -206,6 +206,10 @@ export const reviews = mysqlTable(
     archivedAt: timestamp("archivedAt"),
     /** المستخدم الذي نفذ الأرشفة لضمان قابلية المراجعة والاسترجاع. */
     archivedByUserId: int("archivedByUserId").references(() => users.id, { onDelete: "set null" }),
+    /** الإلغاء لا يحذف العملية؛ يبقي السجل مرئيًا في قائمة العمليات الملغاة للقراءة والاسترجاع. */
+    cancelledAt: timestamp("cancelledAt"),
+    cancelledByUserId: int("cancelledByUserId").references(() => users.id, { onDelete: "set null" }),
+    cancellationReason: varchar("cancellationReason", { length: 1000 }),
     deletedAt: timestamp("deletedAt"),
     deletedByUserId: int("deletedByUserId").references(() => users.id, { onDelete: "set null" }),
     ...auditTimestamps,
@@ -216,7 +220,7 @@ export const reviews = mysqlTable(
     index("reviews_fy_employee_status_idx").on(table.fiscalYearId, table.employeeStatusId),
     index("reviews_fy_employee_idx").on(table.fiscalYearId, table.assignedEmployeeId),
     index("reviews_fy_deleted_created_idx").on(table.fiscalYearId, table.deletedAt, table.createdAt),
-    index("reviews_fy_archived_deleted_created_idx").on(table.fiscalYearId, table.archivedAt, table.deletedAt, table.createdAt),
+    index("reviews_fy_lifecycle_created_idx").on(table.fiscalYearId, table.cancelledAt, table.archivedAt, table.deletedAt, table.createdAt),
     index("reviews_due_date_idx").on(table.dueDate),
   ],
 );

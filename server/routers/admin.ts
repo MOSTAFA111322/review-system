@@ -99,6 +99,19 @@ export const usersRouter = router({
     await db.update(users).set({ passwordHash, passwordChangedAt: new Date(), failedLoginCount: 0, loginLockedUntil: null, sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, user.id));
     return { success: true };
   }),
+  renameLocalUsername: protectedProcedure.input(z.object({ userId: z.number().int().positive(), username: z.string().trim().regex(/^[A-Za-z0-9\u0600-\u06FF._-]{3,64}$/, "اسم المستخدم يجب أن يتكون من أحرف أو أرقام أو النقطة أو الشرطة فقط.") })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const [user] = await db.select({ id: users.id, username: users.username, passwordHash: users.passwordHash, loginMethod: users.loginMethod }).from(users).where(eq(users.id, input.userId)).limit(1);
+    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "الحساب غير موجود." });
+    if (!user.passwordHash || user.loginMethod !== "local") throw new TRPCError({ code: "BAD_REQUEST", message: "يمكن تعديل اسم مستخدم الحسابات المحلية فقط. حساب OAuth يُدار من منصة الدخول." });
+    const username = normalizeLocalUsername(input.username);
+    if (username === user.username) return { success: true, changed: false };
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
+    if (existing && existing.id !== user.id) throw new TRPCError({ code: "CONFLICT", message: "اسم المستخدم مستخدم بالفعل." });
+    await db.update(users).set({ username, sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, user.id));
+    return { success: true, changed: true };
+  }),
   setRoles: protectedProcedure.input(z.object({ userId: z.number().int().positive(), roleIds: z.array(z.number().int().positive()).max(8) })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
     const db = await database();

@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
-import { Archive, ArchiveRestore, ArrowRight, Save } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowRight, Ban, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useRoute } from "wouter";
@@ -31,10 +31,15 @@ export default function ReviewEdit() {
   const utils = trpc.useUtils();
   const review = trpc.reviews.get.useQuery({ id: reviewId }, { enabled: Number.isFinite(reviewId) && reviewId > 0 });
   const isArchived = Boolean(review.data?.archivedAt);
-  const options = trpc.reviews.editOptions.useQuery({ id: reviewId }, { enabled: Boolean(review.data) && !isArchived });
+  const isCancelled = Boolean(review.data?.cancelledAt);
+  const isReadOnly = isArchived || isCancelled;
+  const options = trpc.reviews.editOptions.useQuery({ id: reviewId }, { enabled: Boolean(review.data) && !isReadOnly });
   const [form, setForm] = useState<EditState>(emptyForm);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState("");
   const canUpdate = Boolean(user?.permissions?.includes("*") || user?.permissions?.includes("reviews.update"));
   const canRestore = Boolean(user?.permissions?.includes("*") || user?.permissions?.includes("reviews.restore"));
+  const canCancel = Boolean(user?.permissions?.includes("*") || user?.permissions?.includes("reviews.delete"));
   const invalidateReview = async () => {
     await Promise.all([utils.reviews.get.invalidate({ id: reviewId }), utils.reviews.list.invalidate(), utils.activity.list.invalidate({ reviewId })]);
   };
@@ -62,6 +67,22 @@ export default function ReviewEdit() {
     },
     onError: error => toast.error(error.message || "تعذر استرجاع المراجعة."),
   });
+  const cancelReview = trpc.reviews.cancel.useMutation({
+    onSuccess: async () => {
+      await invalidateReview();
+      toast.success("تم إلغاء المراجعة وحفظ سبب الإلغاء وسجلها دون حذف البيانات.");
+      navigate("/");
+    },
+    onError: error => toast.error(error.message || "تعذر إلغاء المراجعة."),
+  });
+  const restoreCancelled = trpc.reviews.restoreCancelled.useMutation({
+    onSuccess: async () => {
+      await invalidateReview();
+      toast.success("أُعيدت المراجعة الملغاة إلى قائمة العمل.");
+      navigate(`/reviews/${reviewId}`);
+    },
+    onError: error => toast.error(error.message || "تعذر استعادة المراجعة الملغاة."),
+  });
 
   useEffect(() => {
     if (!review.data) return;
@@ -80,9 +101,9 @@ export default function ReviewEdit() {
 
   if (review.isLoading) return <div className="h-96 animate-pulse rounded-2xl bg-slate-100" />;
   if (review.isError) return <LoadError message="تعذر تحميل بيانات المراجعة." retry={() => review.refetch()} />;
-  if (review.data && !isArchived && options.isLoading) return <div className="h-96 animate-pulse rounded-2xl bg-slate-100" />;
-  if (review.data && !isArchived && options.isError) return <LoadError message="تعذر تحميل أنواع المهام والموظفين المتاحين." retry={() => options.refetch()} />;
-  if (!review.data || (!canUpdate && !canRestore)) return <Card className="mx-auto max-w-xl text-center"><CardContent className="p-10"><p className="font-bold text-slate-700">لا تملك صلاحية إدارة هذه المراجعة أو لم تعد متاحة.</p><Link href={reviewId ? `/reviews/${reviewId}` : "/"}><Button className="mt-4">العودة</Button></Link></CardContent></Card>;
+  if (review.data && !isReadOnly && options.isLoading) return <div className="h-96 animate-pulse rounded-2xl bg-slate-100" />;
+  if (review.data && !isReadOnly && options.isError) return <LoadError message="تعذر تحميل أنواع المهام والموظفين المتاحين." retry={() => options.refetch()} />;
+  if (!review.data || (!canUpdate && !canRestore && !canCancel)) return <Card className="mx-auto max-w-xl text-center"><CardContent className="p-10"><p className="font-bold text-slate-700">لا تملك صلاحية إدارة هذه المراجعة أو لم تعد متاحة.</p><Link href={reviewId ? `/reviews/${reviewId}` : "/"}><Button className="mt-4">العودة</Button></Link></CardContent></Card>;
 
   const set = <K extends keyof EditState>(key: K, value: EditState[K]) => setForm(current => ({ ...current, [key]: value }));
   const submit = () => update.mutate({
@@ -102,13 +123,14 @@ export default function ReviewEdit() {
     <Link href={`/reviews/${reviewId}`} className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-blue-700"><ArrowRight className="h-4 w-4" />العودة إلى التفاصيل</Link>
     <Card className="rounded-2xl border-slate-200">
       <CardHeader>
-        <CardTitle>{isArchived ? `مراجعة مؤرشفة ${review.data.internalRef}` : `تعديل المراجعة ${review.data.internalRef}`}</CardTitle>
-        <p className="text-sm text-slate-500">{isArchived ? "المراجعة للقراءة فقط في الأرشيف. يمكن لذوي صلاحية الاسترجاع إعادتها إلى قائمة العمل." : "تتحدد أنواع المهام والموظفون المتاحون من إعدادات السنة المالية والصلاحيات الخادمية."}</p>
+        <CardTitle>{isCancelled ? `مراجعة ملغاة ${review.data.internalRef}` : isArchived ? `مراجعة مؤرشفة ${review.data.internalRef}` : `تعديل المراجعة ${review.data.internalRef}`}</CardTitle>
+        <p className="text-sm text-slate-500">{isCancelled ? "المراجعة للقراءة فقط بعد الإلغاء. يمكن لذوي صلاحية الاستعادة إعادتها إلى قائمة العمل." : isArchived ? "المراجعة للقراءة فقط في الأرشيف. يمكن لذوي صلاحية الاسترجاع إعادتها إلى قائمة العمل." : "تتحدد أنواع المهام والموظفون المتاحون من إعدادات السنة المالية والصلاحيات الخادمية."}</p>
       </CardHeader>
       <CardContent className="space-y-5">
-        {isArchived ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">هذه العملية محفوظة في الأرشيف. لا يُسمح بتعديلها أو تغيير حالتها قبل استرجاعها.</div> : <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">تُنقل العملية إلى الأرشيف فقط عندما تكون حالتا المراجع والموظف مكتملتين. تبقى المرفقات والتعليقات وسجل النشاط محفوظة.</div>}
-        {isArchived ? canRestore ? <Button disabled={restoreFromArchive.isPending} onClick={() => restoreFromArchive.mutate({ id: reviewId })} className="gap-2 bg-amber-700 hover:bg-amber-800"><ArchiveRestore className="h-4 w-4" />{restoreFromArchive.isPending ? "جارٍ الاسترجاع…" : "استرجاع إلى قائمة العمل"}</Button> : null : canUpdate ? <Button variant="outline" disabled={archive.isPending} onClick={() => archive.mutate({ id: reviewId })} className="gap-2 border-amber-300 text-amber-900 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-950/50"><Archive className="h-4 w-4" />{archive.isPending ? "جارٍ النقل…" : "نقل إلى الأرشيف"}</Button> : null}
-        {!isArchived && canUpdate ? <div className="grid gap-5 md:grid-cols-2">
+        {isCancelled ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-950 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100"><p className="font-bold">هذه العملية ملغاة ولا يمكن تعديلها أو تنفيذها.</p><p className="mt-1">سبب الإلغاء: {review.data.cancellationReason || "لم يُسجل سبب."}</p></div> : isArchived ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">هذه العملية محفوظة في الأرشيف. لا يُسمح بتعديلها أو تغيير حالتها قبل استرجاعها.</div> : <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">تُنقل العملية إلى الأرشيف فقط عندما تكون حالتا المراجع والموظف مكتملتين. تبقى المرفقات والتعليقات وسجل النشاط محفوظة.</div>}
+        {isCancelled ? canRestore ? <Button disabled={restoreCancelled.isPending} onClick={() => restoreCancelled.mutate({ id: reviewId })} className="gap-2 bg-red-700 hover:bg-red-800"><ArchiveRestore className="h-4 w-4" />{restoreCancelled.isPending ? "جارٍ الاستعادة…" : "استعادة إلى قائمة العمل"}</Button> : null : isArchived ? canRestore ? <Button disabled={restoreFromArchive.isPending} onClick={() => restoreFromArchive.mutate({ id: reviewId })} className="gap-2 bg-amber-700 hover:bg-amber-800"><ArchiveRestore className="h-4 w-4" />{restoreFromArchive.isPending ? "جارٍ الاسترجاع…" : "استرجاع إلى قائمة العمل"}</Button> : null : <div className="flex flex-wrap gap-2">{canUpdate ? <Button variant="outline" disabled={archive.isPending} onClick={() => archive.mutate({ id: reviewId })} className="gap-2 border-amber-300 text-amber-900 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-100 dark:hover:bg-amber-950/50"><Archive className="h-4 w-4" />{archive.isPending ? "جارٍ النقل…" : "نقل إلى الأرشيف"}</Button> : null}{canCancel ? <Button variant="outline" onClick={() => setCancelling(value => !value)} className="gap-2 border-red-300 text-red-800 hover:bg-red-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/50"><Ban className="h-4 w-4" />إلغاء العملية</Button> : null}</div>}
+        {cancelling && !isReadOnly ? <form className="rounded-xl border border-red-200 bg-red-50/60 p-4" onSubmit={event => { event.preventDefault(); cancelReview.mutate({ id: reviewId, reason: cancellationReason.trim() }); }}><label className="grid gap-2 text-sm font-semibold text-red-950 dark:text-red-100"><span>سبب الإلغاء *</span><Textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} minLength={3} maxLength={1000} required placeholder="اكتب سبب الإلغاء بوضوح؛ سيظهر في السجل ولا يمكن تعديل العملية بعد الإلغاء." className="min-h-24 bg-white dark:bg-slate-950" /></label><div className="mt-3 flex flex-wrap gap-2"><Button type="submit" disabled={cancelReview.isPending || cancellationReason.trim().length < 3} className="bg-red-700 hover:bg-red-800">{cancelReview.isPending ? "جارٍ الإلغاء…" : "تأكيد إلغاء العملية"}</Button><Button type="button" variant="outline" onClick={() => { setCancelling(false); setCancellationReason(""); }}>تراجع</Button></div></form> : null}
+        {!isReadOnly && canUpdate ? <div className="grid gap-5 md:grid-cols-2">
           <Field label="عنوان المراجعة" required><Input value={form.title} onChange={event => set("title", event.target.value)} /></Field>
           <Field label="نوع المهمة" required><select value={form.operationTypeId} onChange={event => set("operationTypeId", event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">اختر النوع</option>{options.data?.operationTypes.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}</select></Field>
           <Field label="الموظف المكلّف"><select value={form.assignedEmployeeId} onChange={event => set("assignedEmployeeId", event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">غير مكلّف</option>{options.data?.employees.map(employee => <option key={employee.id} value={employee.id}>{employee.displayName}</option>)}</select></Field>

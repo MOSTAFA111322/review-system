@@ -14,7 +14,7 @@ async function getAnalyticsRows(user: Parameters<typeof requirePermission>[0], i
   await requireFiscalYearAccess(user, input.fiscalYearId);
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة حاليًا." });
-  const conditions = [eq(reviews.fiscalYearId, input.fiscalYearId), isNull(reviews.deletedAt)];
+  const conditions = [eq(reviews.fiscalYearId, input.fiscalYearId), isNull(reviews.deletedAt), isNull(reviews.cancelledAt)];
   if (input.startDate) conditions.push(gte(reviews.createdAt, input.startDate));
   if (input.endDate) conditions.push(lte(reviews.createdAt, input.endDate));
   const canViewAll = user.role === "admin" || await userHasPermission(user, PERMISSIONS.REVIEWS_VIEW_ALL);

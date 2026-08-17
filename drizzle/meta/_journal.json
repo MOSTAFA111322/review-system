@@ -36,6 +36,13 @@
       "when": 1786756111213,
       "tag": "0004_last_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786953452150,
+      "tag": "0005_tired_black_cat",
+      "breakpoints": true
     }
   ]
 }

@@ -190,8 +190,19 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       await manager.reviews.restoreFromArchive({ id: primary.id });
       const activeAfterRestore = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
       expect(activeAfterRestore.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, archivedAt: null })]));
+      await expect(employee.reviews.cancel({ id: primary.id, reason: "محاولة إلغاء غير مصرح بها" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await manager.reviews.cancel({ id: primary.id, reason: "ألغي السند ضمن سيناريو قبول مؤقت." });
+      const cancelledAfterCancel = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "cancelled", sortBy: "createdAt", sortDirection: "desc" });
+      expect(cancelledAfterCancel.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, cancelledAt: expect.any(Date), cancellationReason: "ألغي السند ضمن سيناريو قبول مؤقت." })]));
+      const activeAfterCancel = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
+      expect(activeAfterCancel.items.some(item => item.id === primary.id)).toBe(false);
+      await expect(manager.reviews.update({ id: primary.id, title: "تعديل ممنوع بعد الإلغاء" })).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(manager.reviews.changeStatus({ id: primary.id, side: "reviewer", toStatusId: reviewerOpen.id })).rejects.toMatchObject({ code: "CONFLICT" });
+      await manager.reviews.restoreCancelled({ id: primary.id });
+      const activeAfterCancelledRestore = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
+      expect(activeAfterCancelledRestore.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, cancelledAt: null, cancellationReason: null })]));
       const activity = await manager.activity.list({ reviewId: primary.id });
-      expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "review.archived", "review.unarchived", "customFields.updated"]));
+      expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "review.archived", "review.unarchived", "review.cancelled", "review.cancelled.restored", "customFields.updated"]));
 
       const attachmentFixtures = [
         { fileName: `uat-${runId}.pdf`, mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF\n") },

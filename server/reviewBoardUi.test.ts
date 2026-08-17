@@ -30,11 +30,13 @@ describe("واجهة لوحة المراجعات المتجاوبة", () => {
   });
 
   it("يفصل قائمة العمل اليومية عن الأرشيف دون تغيير الفلاتر المالية", () => {
-    expect(reviewBoardSource).toContain('useState<"active" | "archived">("active")');
+    expect(reviewBoardSource).toContain('useState<"active" | "archived" | "cancelled">("active")');
     expect(reviewBoardSource).toContain("archiveScope,");
     expect(reviewBoardSource).toContain('setArchiveScope("active")');
     expect(reviewBoardSource).toContain('setArchiveScope("archived")');
+    expect(reviewBoardSource).toContain('setArchiveScope("cancelled")');
     expect(reviewBoardSource).toContain("أرشيف عمليات المراجعة");
+    expect(reviewBoardSource).toContain("المراجعات الملغاة");
     expect(reviewBoardSource).toContain("قائمة العمل");
   });
 });
