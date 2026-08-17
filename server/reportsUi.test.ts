@@ -15,6 +15,9 @@ describe("واجهة تصدير التقرير الأسبوعي", () => {
   it("تُنشئ ملف CSV من البيانات التي أعادها التقرير الخادمي فقط", () => {
     expect(reportsSource).toContain("weeklyOverdue.refetch()");
     expect(reportsSource).toContain("التقرير-الأسبوعي-للمهام-المتأخرة.csv");
+    expect(reportsSource).toContain("التقرير-الأسبوعي-للمهام-المتأخرة.xls");
+    expect(reportsSource).toContain('exportWeeklyData("xls")');
+    expect(reportsSource).toContain('exportWeeklyData("csv")');
     expect(reportsSource).toContain("وفق نطاق صلاحيتك");
   });
 });
