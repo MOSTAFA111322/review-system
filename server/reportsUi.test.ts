@@ -20,5 +20,12 @@ describe("واجهة تصدير التقرير الأسبوعي", () => {
     expect(reportsSource).toContain('exportWeeklyData("csv")');
     expect(reportsSource).toContain("وفق نطاق صلاحيتك");
   });
+
+  it("تدعم اختيار أعمدة التقرير وتمنع التصدير عند عدم اختيار أي عمود", () => {
+    expect(reportsSource).toContain("selectedExportKeys");
+    expect(reportsSource).toContain("selectedWeeklyKeys");
+    expect(reportsSource).toContain("اختر عمودًا واحدًا على الأقل قبل التصدير");
+    expect(reportsSource).toContain("أعمدة التقرير الأسبوعي");
+  });
 });
 
