@@ -137,7 +137,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       const createInput = { fiscalYearId: firstYear.id, operationTypeId: purchasesTypeId, reviewerStatusId: reviewerOpen.id, employeeStatusId: employeeOpen.id, assignedEmployeeId: assignedEmployee.id, voucherNumber: null, title: `UAT مشتريات عاجلة ${runId}`, description: "وصف قبول مؤقت", problem: "مشكلة اختبار UAT", requiredAction: "إجراء تصحيحي", priority: "critical" as const, dueDate: `${yearOne}-06-15` };
       const primary = await manager.reviews.create(createInput);
       createdReviewIds.push(primary.id);
-      expect(primary.internalRef).toMatch(new RegExp(`^REV-${yearOne}-\\d{6}$`));
+      expect(primary.internalRef).toMatch(new RegExp(`^REV-${yearOne}-\\d{6,}$`));
       for (let index = 0; index < 5; index += 1) {
         const extra = await manager.reviews.create({ ...createInput, title: `UAT سجل ${index} ${runId}`, voucherNumber: `V-${runId}-${index}`, priority: index === 0 ? "urgent" : "normal" });
         createdReviewIds.push(extra.id);

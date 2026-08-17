@@ -9,6 +9,7 @@ import { useAuth } from "./_core/hooks/useAuth";
 import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
+import MyTasks from "./pages/MyTasks";
 import ReviewDetail from "./pages/ReviewDetail";
 import ReviewEdit from "./pages/ReviewEdit";
 import Settings from "./pages/Settings";
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/reviews/:id" component={ReviewDetail} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/reports" component={Reports} />
+      <Route path="/my-tasks" component={MyTasks} />
       <Route path="/settings" component={Settings} />
       <Route path="/users" component={Users} />
       <Route path="/login" component={Login} />

@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { employeeStatuses, employees, fiscalYears, notifications, operationTypes, reviewActivityLog, reviewerStatuses, reviews, statusTransitions } from "../../drizzle/schema";
@@ -249,6 +249,43 @@ export const reviewsRouter = router({
     ]);
     const total = Number(counted[0]?.count ?? 0);
     return { items: result, total, page: plan.page, pageSize: plan.pageSize, totalPages: Math.ceil(total / plan.pageSize) };
+  }),
+
+  myTasks: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ASSIGNED);
+    await requireFiscalYearAccess(ctx.user, input.fiscalYearId, false);
+    const employee = await getEmployeeForUser(ctx.user.id);
+    if (!employee) return { employee: null, items: [], total: 0, overdue: 0, dueSoon: 0 };
+    const db = await database();
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const threeDaysAhead = new Date(today);
+    threeDaysAhead.setUTCDate(threeDaysAhead.getUTCDate() + 3);
+    const activeConditions: SQL[] = [
+      eq(reviews.fiscalYearId, input.fiscalYearId),
+      eq(reviews.assignedEmployeeId, employee.id),
+      isNull(reviews.deletedAt),
+      isNull(reviews.archivedAt),
+      isNull(reviews.cancelledAt),
+    ];
+    const [items, overdueRows, dueSoonRows, countRows] = await Promise.all([
+      db.select({
+        id: reviews.id, internalRef: reviews.internalRef, title: reviews.title, priority: reviews.priority, dueDate: reviews.dueDate,
+        operationTypeName: operationTypes.name, operationTypeColor: operationTypes.color,
+        reviewerStatusName: reviewerStatuses.name, reviewerStatusColor: reviewerStatuses.color,
+        employeeStatusName: employeeStatuses.name, employeeStatusColor: employeeStatuses.color,
+      }).from(reviews)
+        .innerJoin(operationTypes, eq(reviews.operationTypeId, operationTypes.id))
+        .innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id))
+        .innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id))
+        .where(and(...activeConditions)).orderBy(asc(reviews.dueDate), desc(reviews.createdAt)).limit(100),
+      db.select({ count: sql<number>`count(*)` }).from(reviews).where(and(...activeConditions, isNotNull(reviews.dueDate), lt(reviews.dueDate, today))),
+      db.select({ count: sql<number>`count(*)` }).from(reviews).where(and(...activeConditions, isNotNull(reviews.dueDate), gte(reviews.dueDate, tomorrow), lte(reviews.dueDate, threeDaysAhead))),
+      db.select({ count: sql<number>`count(*)` }).from(reviews).where(and(...activeConditions)),
+    ]);
+    return { employee: { id: employee.id, displayName: employee.displayName }, items, total: Number(countRows[0]?.count ?? 0), overdue: Number(overdueRows[0]?.count ?? 0), dueSoon: Number(dueSoonRows[0]?.count ?? 0) };
   }),
 
   get: protectedProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ ctx, input }) => {

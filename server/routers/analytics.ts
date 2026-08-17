@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, lte } from "drizzle-orm";
 import { z } from "zod";
 import { calculateOverview, reportRows } from "../analytics";
 import { employees, employeeStatuses, operationTypes, reviewerStatuses, reviewActivityLog, reviews } from "../../drizzle/schema";
@@ -8,8 +8,11 @@ import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermiss
 import { protectedProcedure, router } from "../_core/trpc";
 
 const periodInput = z.object({ fiscalYearId: z.number().int().positive(), startDate: z.coerce.date().optional(), endDate: z.coerce.date().optional() }).refine(input => !input.startDate || !input.endDate || input.startDate <= input.endDate, { message: "يجب أن يسبق تاريخ البداية تاريخ النهاية." });
+const overdueInput = z.object({ fiscalYearId: z.number().int().positive(), weeksBack: z.number().int().min(1).max(52).default(12) });
 
-async function getAnalyticsRows(user: Parameters<typeof requirePermission>[0], input: z.infer<typeof periodInput>) {
+type AnalyticsUser = Parameters<typeof requirePermission>[0];
+
+async function getAnalyticsRows(user: AnalyticsUser, input: z.infer<typeof periodInput>) {
   await requirePermission(user, PERMISSIONS.REPORTS_VIEW);
   await requireFiscalYearAccess(user, input.fiscalYearId);
   const db = await getDb();
@@ -31,18 +34,55 @@ async function getAnalyticsRows(user: Parameters<typeof requirePermission>[0], i
   return { rows, returnedIds: new Set(Array.from(changes).filter(([, count]) => count > 1).map(([id]) => id)) };
 }
 
+function isoDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+export function mondayOf(dateText: string) {
+  const date = new Date(`${dateText}T00:00:00Z`);
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1));
+  return isoDate(date);
+}
+
+async function getWeeklyOverdue(user: AnalyticsUser, input: z.infer<typeof overdueInput>) {
+  await requirePermission(user, PERMISSIONS.REPORTS_VIEW);
+  await requireFiscalYearAccess(user, input.fiscalYearId);
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة حاليًا." });
+  const today = new Date();
+  const todayText = isoDate(today);
+  const cutoff = new Date(`${todayText}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - input.weeksBack * 7);
+  const cutoffText = isoDate(cutoff);
+  const conditions = [eq(reviews.fiscalYearId, input.fiscalYearId), isNull(reviews.deletedAt), isNull(reviews.cancelledAt), isNull(reviews.archivedAt), lt(reviews.dueDate, today)];
+  const canViewAll = user.role === "admin" || await userHasPermission(user, PERMISSIONS.REVIEWS_VIEW_ALL);
+  if (!canViewAll) {
+    const [employee] = await db.select({ id: employees.id }).from(employees).where(eq(employees.userId, user.id)).limit(1);
+    if (!employee) return { asOf: todayText, weeksBack: input.weeksBack, total: 0, rows: [] };
+    conditions.push(eq(reviews.assignedEmployeeId, employee.id));
+  }
+  const overdueRows = await db.select({ id: reviews.id, internalRef: reviews.internalRef, title: reviews.title, dueDate: reviews.dueDate, priority: reviews.priority, employeeId: employees.id, employeeName: employees.displayName, reviewerTerminal: reviewerStatuses.isTerminal, employeeTerminal: employeeStatuses.isTerminal }).from(reviews).innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id)).innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id)).leftJoin(employees, eq(reviews.assignedEmployeeId, employees.id)).where(and(...conditions));
+  const grouped = new Map<string, { weekStart: string; employeeId: number | null; employeeName: string; count: number; critical: number; urgent: number; reviewIds: number[] }>();
+  for (const row of overdueRows) {
+    if (!row.dueDate || isoDate(new Date(row.dueDate)) < cutoffText || (row.reviewerTerminal && row.employeeTerminal)) continue;
+    const dueText = isoDate(new Date(row.dueDate));
+    const weekStart = mondayOf(dueText);
+    const key = `${weekStart}:${row.employeeId ?? "unassigned"}`;
+    const current = grouped.get(key) ?? { weekStart, employeeId: row.employeeId, employeeName: row.employeeName ?? "غير مكلف", count: 0, critical: 0, urgent: 0, reviewIds: [] };
+    current.count += 1;
+    current.critical += row.priority === "critical" ? 1 : 0;
+    current.urgent += row.priority === "urgent" ? 1 : 0;
+    current.reviewIds.push(row.id);
+    grouped.set(key, current);
+  }
+  const rows = Array.from(grouped.values()).sort((a, b) => b.weekStart.localeCompare(a.weekStart) || a.employeeName.localeCompare(b.employeeName, "ar"));
+  return { asOf: todayText, weeksBack: input.weeksBack, total: rows.reduce((sum, row) => sum + row.count, 0), rows };
+}
+
 export const analyticsRouter = router({
-  overview: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => {
-    const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input);
-    return calculateOverview(rows, returnedIds);
-  }),
-  report: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => {
-    const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input);
-    return reportRows(rows, returnedIds);
-  }),
-  export: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => {
-    await requirePermission(ctx.user, PERMISSIONS.REPORTS_EXPORT);
-    const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input);
-    return reportRows(rows, returnedIds);
-  }),
+  overview: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return calculateOverview(rows, returnedIds); }),
+  report: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return reportRows(rows, returnedIds); }),
+  export: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { await requirePermission(ctx.user, PERMISSIONS.REPORTS_EXPORT); const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return reportRows(rows, returnedIds); }),
+  weeklyOverdue: protectedProcedure.input(overdueInput).query(({ ctx, input }) => getWeeklyOverdue(ctx.user, input)),
 });

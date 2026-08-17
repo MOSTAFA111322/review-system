@@ -22,13 +22,14 @@ import {
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
-import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
+import {   Bell, ClipboardCheck, FileBarChart, LayoutDashboard, ListChecks, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { useTheme } from "../contexts/ThemeContext";
 
 const navigation = [
   { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/" },
+  { icon: ListChecks, label: "مهامي", path: "/my-tasks", permission: "reviews.view.assigned" },
   { icon: LayoutDashboard, label: "لوحة الأداء", path: "/dashboard" },
   { icon: FileBarChart, label: "الخلاصة والتقارير", path: "/reports" },
   { icon: Settings, label: "الإعدادات", path: "/settings", permission: "settings.manage" },

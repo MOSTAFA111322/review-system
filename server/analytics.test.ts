@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateOverview, reportRows } from "./analytics";
+import { analyticsRouter, mondayOf } from "./routers/analytics";
 
 const now = new Date("2026-01-10T12:00:00.000Z");
 
@@ -14,5 +15,16 @@ describe("analytics", () => {
 
   it("يصدر تقريرًا خاليًا دون اختراع سجلات مراجعة للاختبار", () => {
     expect(reportRows([], new Set(), now)).toEqual([]);
+  });
+
+  it("يحسب بداية الأسبوع وفق معيار الاثنين ويعالج الأحد ضمن الأسبوع السابق", () => {
+    expect(mondayOf("2026-08-17")).toBe("2026-08-17");
+    expect(mondayOf("2026-08-23")).toBe("2026-08-17");
+  });
+
+  it("يسجل التقرير الأسبوعي والتصدير كإجراءات تحليلية محمية", () => {
+    const procedures = analyticsRouter._def.procedures;
+    expect(procedures.weeklyOverdue).toBeDefined();
+    expect(procedures.export).toBeDefined();
   });
 });
