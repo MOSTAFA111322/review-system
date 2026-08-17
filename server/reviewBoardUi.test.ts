@@ -39,4 +39,29 @@ describe("واجهة لوحة المراجعات المتجاوبة", () => {
     expect(reviewBoardSource).toContain("المراجعات الملغاة");
     expect(reviewBoardSource).toContain("قائمة العمل");
   });
+
+  it("يوفر مرشحات متابعة سريعة للخطر التشغيلي دون تجاوز قائمة الخادم", () => {
+    expect(reviewBoardSource).toContain('useState<"all" | "overdue" | "dueSoon" | "unassigned" | "critical">("all")');
+    expect(reviewBoardSource).toContain("attention: attention === \"all\" ? undefined : attention");
+    expect(reviewBoardSource).toContain("تحتاج متابعة");
+    expect(reviewBoardSource).toContain("خلال 3 أيام");
+    expect(reviewBoardSource).toContain("دون تكليف");
+    expect(reviewBoardSource).toContain("متأخرة");
+  });
+
+  it("يبقي دليل المسار التشغيلي قريبًا من قائمة العمل دون فرضه على المستخدم", () => {
+    expect(reviewBoardSource).toContain("دليل المسار السريع للعمل");
+    expect(reviewBoardSource).toContain("لا تُعد العملية مكتملة حتى يكتمل مسارا الموظف والمراجع");
+    expect(reviewBoardSource).toContain("أرشف المكتمل، وألغِ غير الصالح");
+    expect(reviewBoardSource).toContain("<details");
+  });
+
+  it("يوضح قرب الاستحقاق في صفوف القائمة وبطاقات الجوال", () => {
+    expect(reviewBoardSource).toContain("<DueHint dueDate={review.dueDate} />");
+    expect(reviewBoardSource).toContain('count === 1 ? "يوم"');
+    expect(reviewBoardSource).toContain('count === 2 ? "يومين"');
+    expect(reviewBoardSource).toContain("${count} أيام");
+    expect(reviewBoardSource).toContain("متأخرة ${dayLabel(Math.abs(days))}");
+    expect(reviewBoardSource).toContain("خلال ${dayLabel(days)}");
+  });
 });

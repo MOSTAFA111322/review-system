@@ -10,6 +10,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const priority = z.enum(["normal", "urgent", "critical"]);
+const attention = z.enum(["overdue", "dueSoon", "unassigned", "critical"]);
 
 const reviewInput = z.object({
   fiscalYearId: z.number().int().positive(),
@@ -96,6 +97,7 @@ export const reviewListInput = z.object({
   assignedEmployeeId: z.number().int().positive().optional(),
   dueFrom: dateString.optional(),
   dueTo: dateString.optional(),
+  attention: attention.optional(),
   archiveScope: z.enum(["active", "archived", "cancelled"]).default("active"),
   sortBy: z.enum(["createdAt", "dueDate", "internalRef", "priority"]).default("createdAt"),
   sortDirection: z.enum(["asc", "desc"]).default("desc"),
@@ -116,6 +118,7 @@ export function buildReviewListPlan(input: z.infer<typeof reviewListInput>) {
     assignedEmployeeId: input.assignedEmployeeId,
     dueFrom: toDate(input.dueFrom),
     dueTo: toDate(input.dueTo),
+    attention: input.attention,
     archiveScope: input.archiveScope,
     sortBy: input.sortBy,
     sortDirection: input.sortDirection,
@@ -214,6 +217,23 @@ export const reviewsRouter = router({
     if (plan.assignedEmployeeId) conditions.push(eq(reviews.assignedEmployeeId, plan.assignedEmployeeId));
     if (plan.dueFrom) conditions.push(gte(reviews.dueDate, plan.dueFrom));
     if (plan.dueTo) conditions.push(lte(reviews.dueDate, plan.dueTo));
+    if (plan.attention === "overdue") {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      conditions.push(isNotNull(reviews.dueDate), lte(reviews.dueDate, yesterday));
+    } else if (plan.attention === "dueSoon") {
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const threeDaysAhead = new Date(today);
+      threeDaysAhead.setUTCDate(threeDaysAhead.getUTCDate() + 3);
+      conditions.push(isNotNull(reviews.dueDate), gte(reviews.dueDate, today), lte(reviews.dueDate, threeDaysAhead));
+    } else if (plan.attention === "unassigned") {
+      conditions.push(isNull(reviews.assignedEmployeeId));
+    } else if (plan.attention === "critical") {
+      conditions.push(eq(reviews.priority, "critical"));
+    }
     const where = and(...conditions);
     const sortColumn = { createdAt: reviews.createdAt, dueDate: reviews.dueDate, internalRef: reviews.internalRef, priority: reviews.priority }[plan.sortBy];
     const ordering = plan.sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn);

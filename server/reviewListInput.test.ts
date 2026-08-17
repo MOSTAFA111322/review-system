@@ -15,11 +15,12 @@ describe("review list input", () => {
       assignedEmployeeId: 5,
       dueFrom: "2026-01-01",
       dueTo: "2026-12-31",
+      attention: "overdue",
       archiveScope: "archived",
       sortBy: "dueDate",
       sortDirection: "asc",
     });
-    expect(result).toMatchObject({ fiscalYearId: 1, page: 2, pageSize: 50, archiveScope: "archived", sortBy: "dueDate", sortDirection: "asc" });
+    expect(result).toMatchObject({ fiscalYearId: 1, page: 2, pageSize: 50, attention: "overdue", archiveScope: "archived", sortBy: "dueDate", sortDirection: "asc" });
     expect(reviewListInput.parse({ fiscalYearId: 1 }).archiveScope).toBe("active");
   });
 
@@ -27,6 +28,7 @@ describe("review list input", () => {
     expect(() => reviewListInput.parse({ fiscalYearId: 0 })).toThrow();
     expect(() => reviewListInput.parse({ fiscalYearId: 1, pageSize: 101 })).toThrow();
     expect(() => reviewListInput.parse({ fiscalYearId: 1, priorities: ["unknown"] })).toThrow();
+    expect(() => reviewListInput.parse({ fiscalYearId: 1, attention: "later" })).toThrow();
     expect(() => reviewListInput.parse({ fiscalYearId: 1, dueFrom: "01/01/2026" })).toThrow();
   });
 
@@ -43,11 +45,12 @@ describe("review list input", () => {
       assignedEmployeeId: 5,
       dueFrom: "2026-01-01",
       dueTo: "2026-12-31",
+      attention: "dueSoon",
       archiveScope: "archived",
       sortBy: "priority",
       sortDirection: "asc",
     }));
-    expect(plan).toMatchObject({ fiscalYearId: 9, offset: 50, queryTerm: "%100\\%\\_%", archiveScope: "archived", sortBy: "priority", sortDirection: "asc" });
+    expect(plan).toMatchObject({ fiscalYearId: 9, offset: 50, queryTerm: "%100\\%\\_%", attention: "dueSoon", archiveScope: "archived", sortBy: "priority", sortDirection: "asc" });
     expect(plan.dueFrom?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
     expect(plan.dueTo?.toISOString()).toBe("2026-12-31T00:00:00.000Z");
   });
