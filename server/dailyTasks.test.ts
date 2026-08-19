@@ -47,7 +47,16 @@ describe("daily tasks import contract", () => {
     expect(source).toContain("daily_task.weekly_report");
     expect(source).toContain("reports.view");
     expect(source).toContain("isNull(notifications.readAt)");
-    expect(source).toContain("today.getUTCDay() === 1");
+    expect(source).toContain("today.getUTCDay() === 6");
+  });
+
+  it("يتضمن عقد طباعة المهام فلاتر الكل والمتأخر والتصنيف", () => {
+    const source = readFileSync(new URL("../client/src/pages/DailyTasks.tsx", import.meta.url), "utf8");
+    expect(source).toContain("printScope");
+    expect(source).toContain("طباعة الكل");
+    expect(source).toContain("طباعة المتأخرة");
+    expect(source).toContain("تصنيف الطباعة حسب الأولوية");
+    expect(source).toContain("window.print()");
   });
 
   it("يبقي التقرير الموحد مقيدًا بتصريح التقارير وبالسنة المالية", () => {

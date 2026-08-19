@@ -267,3 +267,49 @@
     transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
   }
 }
+
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  aside,
+  nav,
+  button,
+  input,
+  select,
+  textarea,
+  .print-exclude {
+    display: none !important;
+  }
+
+  main {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  main > *:not(:last-child) {
+    display: none !important;
+  }
+
+  .print\\:flex {
+    display: flex !important;
+  }
+
+  table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse !important;
+    font-size: 10pt !important;
+  }
+
+  th,
+  td {
+    border: 1px solid #cbd5e1 !important;
+    color: black !important;
+    background: white !important;
+  }
+}

@@ -149,7 +149,7 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
     }
 
     let weeklyReport = null;
-    if (today.getUTCDay() === 1) {
+    if (today.getUTCDay() === 6) {
       const weekStart = new Date(today.getTime() - 7 * DAY_MS);
       weeklyReport = await sendWeeklyManagerReport(db, fiscalYear.id, weekStart, today);
     }
