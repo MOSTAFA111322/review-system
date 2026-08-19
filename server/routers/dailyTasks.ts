@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYears, operationTypes, reviewerStatuses, reviews } from "../../drizzle/schema";
@@ -46,6 +46,12 @@ const taskListInput = z.object({
 }).refine(value => !value.startDate || !value.endDate || value.endDate >= value.startDate, { message: "نطاق التاريخ غير صحيح." });
 
 export const dailyTasksRouter = router({
+  employees: protectedProcedure.query(async ({ ctx }) => {
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
+    const db = await database();
+    return db.select({ id: employees.id, displayName: employees.displayName }).from(employees).where(eq(employees.isActive, true)).orderBy(asc(employees.displayName));
+  }),
+
   templates: router({
     list: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive(), employeeId: z.number().int().positive().optional() })).query(async ({ ctx, input }) => {
       await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_VIEW);
@@ -93,6 +99,29 @@ export const dailyTasksRouter = router({
       conditions.push(eq(dailyTasks.employeeId, employee.id));
     }
     return db.select({ id: dailyTasks.id, fiscalYearId: dailyTasks.fiscalYearId, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, templateId: dailyTasks.templateId, reviewId: dailyTasks.reviewId, title: dailyTasks.title, description: dailyTasks.description, taskDate: dailyTasks.taskDate, dueTime: dailyTasks.dueTime, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, completedAt: dailyTasks.completedAt }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...conditions)).orderBy(desc(dailyTasks.taskDate), asc(employees.displayName), asc(dailyTasks.title));
+  }),
+
+  importBatch: protectedProcedure.input(z.object({
+    fiscalYearId: z.number().int().positive(),
+    rows: z.array(z.object({
+      employeeId: z.number().int().positive(),
+      title: z.string().trim().min(2).max(220),
+      description: z.string().trim().max(5000).optional(),
+      taskDate: dateText,
+      dueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+      priority: priority.default("normal"),
+    })).min(1).max(500),
+  })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
+    await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
+    const db = await database();
+    const employeeIds = Array.from(new Set(input.rows.map(row => row.employeeId)));
+    const activeEmployees = await db.select({ id: employees.id }).from(employees).where(and(eq(employees.isActive, true), inArray(employees.id, employeeIds)));
+    if (activeEmployees.length !== employeeIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "يحتوي الملف على موظف غير موجود أو غير نشط." });
+    const keys = input.rows.map(row => `${row.employeeId}|${row.taskDate}|${row.title.toLocaleLowerCase("ar")}`);
+    if (new Set(keys).size !== keys.length) throw new TRPCError({ code: "BAD_REQUEST", message: "يوجد تكرار داخل ملف الاستيراد لنفس الموظف والتاريخ والمهمة." });
+    await db.insert(dailyTasks).values(input.rows.map(row => ({ ...row, fiscalYearId: input.fiscalYearId, taskDate: new Date(`${row.taskDate}T00:00:00.000Z`), source: "imported" as const, createdByUserId: ctx.user.id })));
+    return { imported: input.rows.length };
   }),
 
   updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status })).mutation(async ({ ctx, input }) => {
