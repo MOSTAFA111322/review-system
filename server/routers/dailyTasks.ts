@@ -9,6 +9,14 @@ import { protectedProcedure, router } from "../_core/trpc";
 const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "التاريخ يجب أن يكون بصيغة YYYY-MM-DD.");
 const priority = z.enum(["normal", "urgent", "critical"]);
 const status = z.enum(["pending", "in_progress", "completed", "skipped"]);
+const recurrenceType = z.enum(["daily", "workdays", "weekly"]);
+
+export function matchesRecurrence(date: Date, type: "daily" | "workdays" | "weekly", days?: string | null) {
+  if (type === "daily") return true;
+  const day = date.getUTCDay();
+  if (type === "workdays") return day >= 0 && day <= 4;
+  return new Set((days ?? "").split(",").filter(Boolean).map(Number)).has(day);
+}
 
 async function database() {
   const db = await getDb();
@@ -33,9 +41,11 @@ const templateInput = z.object({
   description: z.string().trim().max(5000).optional(),
   priority: priority.default("normal"),
   defaultDueTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  recurrenceType: recurrenceType.default("daily"),
+  recurrenceDays: z.string().regex(/^[0-6](,[0-6])*$/).optional(),
   startDate: dateText,
   endDate: dateText.optional(),
-}).refine(value => !value.endDate || value.endDate >= value.startDate, { message: "تاريخ نهاية القالب يجب أن يساوي أو يتجاوز تاريخ البداية." });
+}).refine(value => !value.endDate || value.endDate >= value.startDate, { message: "تاريخ نهاية القالب يجب أن يساوي أو يتجاوز تاريخ البداية." }).refine(value => value.recurrenceType !== "weekly" || Boolean(value.recurrenceDays), { message: "حدد أيام الأسبوع عند اختيار التكرار الأسبوعي." });
 
 const taskListInput = z.object({
   fiscalYearId: z.number().int().positive(),
@@ -69,7 +79,7 @@ export const dailyTasksRouter = router({
         if (!employee) return [];
         conditions.push(eq(dailyTaskTemplates.employeeId, employee.id));
       }
-      return db.select({ id: dailyTaskTemplates.id, fiscalYearId: dailyTaskTemplates.fiscalYearId, employeeId: dailyTaskTemplates.employeeId, employeeName: employees.displayName, title: dailyTaskTemplates.title, description: dailyTaskTemplates.description, priority: dailyTaskTemplates.priority, defaultDueTime: dailyTaskTemplates.defaultDueTime, startDate: dailyTaskTemplates.startDate, endDate: dailyTaskTemplates.endDate, source: dailyTaskTemplates.source }).from(dailyTaskTemplates).innerJoin(employees, eq(dailyTaskTemplates.employeeId, employees.id)).where(and(...conditions)).orderBy(asc(employees.displayName), asc(dailyTaskTemplates.startDate), asc(dailyTaskTemplates.title));
+      return db.select({ id: dailyTaskTemplates.id, fiscalYearId: dailyTaskTemplates.fiscalYearId, employeeId: dailyTaskTemplates.employeeId, employeeName: employees.displayName, title: dailyTaskTemplates.title, description: dailyTaskTemplates.description, priority: dailyTaskTemplates.priority, defaultDueTime: dailyTaskTemplates.defaultDueTime, recurrenceType: dailyTaskTemplates.recurrenceType, recurrenceDays: dailyTaskTemplates.recurrenceDays, startDate: dailyTaskTemplates.startDate, endDate: dailyTaskTemplates.endDate, source: dailyTaskTemplates.source }).from(dailyTaskTemplates).innerJoin(employees, eq(dailyTaskTemplates.employeeId, employees.id)).where(and(...conditions)).orderBy(asc(employees.displayName), asc(dailyTaskTemplates.startDate), asc(dailyTaskTemplates.title));
     }),
     create: protectedProcedure.input(templateInput).mutation(async ({ ctx, input }) => {
       await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
@@ -167,6 +177,27 @@ export const dailyTasksRouter = router({
     }
     await db.update(dailyTasks).set({ status: input.status, notes: input.notes, completedAt: input.status === "completed" ? new Date() : null, completedByUserId: input.status === "completed" ? ctx.user.id : null }).where(eq(dailyTasks.id, input.id));
     return { success: true };
+  }),
+
+  operationalIndicators: protectedProcedure.input(taskListInput).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_VIEW);
+    await requireFiscalYearAccess(ctx.user, input.fiscalYearId);
+    const db = await database();
+    const manage = await canManage(ctx.user);
+    const employee = !manage ? await linkedEmployee(ctx.user.id) : undefined;
+    if (!manage && !employee) return { total: 0, completed: 0, overdue: 0, unupdated: 0, completionRate: 0, byEmployee: [] };
+    const employeeId = input.employeeId ?? employee?.id;
+    if (!manage && employeeId !== employee?.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك عرض مؤشرات موظف آخر." });
+    const conditions = [eq(dailyTasks.fiscalYearId, input.fiscalYearId)];
+    if (employeeId) conditions.push(eq(dailyTasks.employeeId, employeeId));
+    if (input.startDate) conditions.push(gte(dailyTasks.taskDate, new Date(`${input.startDate}T00:00:00.000Z`)));
+    if (input.endDate) conditions.push(lte(dailyTasks.taskDate, new Date(`${input.endDate}T23:59:59.999Z`)));
+    const rows = await db.select({ employeeId: dailyTasks.employeeId, employeeName: employees.displayName, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...conditions));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const summary = rows.reduce((acc, row) => { acc.total += 1; if (row.status === "completed") acc.completed += 1; if (row.status !== "completed" && row.status !== "skipped" && new Date(row.taskDate).getTime() < today.getTime()) acc.overdue += 1; if (row.status !== "completed" && !row.notes?.trim()) acc.unupdated += 1; return acc; }, { total: 0, completed: 0, overdue: 0, unupdated: 0 });
+    const grouped = new Map<number, { employeeId: number; employeeName: string; total: number; completed: number; overdue: number; unupdated: number }>();
+    for (const row of rows) { const current = grouped.get(row.employeeId) ?? { employeeId: row.employeeId, employeeName: row.employeeName, total: 0, completed: 0, overdue: 0, unupdated: 0 }; current.total += 1; if (row.status === "completed") current.completed += 1; if (row.status !== "completed" && row.status !== "skipped" && new Date(row.taskDate).getTime() < today.getTime()) current.overdue += 1; if (row.status !== "completed" && !row.notes?.trim()) current.unupdated += 1; grouped.set(row.employeeId, current); }
+    return { ...summary, completionRate: summary.total ? Math.round((summary.completed / summary.total) * 100) : 0, byEmployee: Array.from(grouped.values()).sort((a, b) => b.overdue - a.overdue || a.employeeName.localeCompare(b.employeeName, "ar")) };
   }),
 
   unifiedReport: protectedProcedure.input(taskListInput).query(async ({ ctx, input }) => {

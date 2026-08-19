@@ -114,9 +114,10 @@ export const fiscalYears = mysqlTable(
     createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
     closedByUserId: int("closedByUserId").references(() => users.id, { onDelete: "set null" }),
     closedAt: timestamp("closedAt"),
+    scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
     ...auditTimestamps,
   },
-  table => [index("fiscal_years_status_idx").on(table.status), index("fiscal_years_current_idx").on(table.isCurrent)],
+  table => [index("fiscal_years_status_idx").on(table.status), index("fiscal_years_current_idx").on(table.isCurrent), index("fiscal_years_schedule_uid_idx").on(table.scheduleCronTaskUid)],
 );
 
 /** نطاق وصول المستخدم للسنوات؛ عدم وجود سجل يعني لا يسمح بالقراءة إلا لمدير النظام. */
@@ -332,6 +333,8 @@ export const dailyTaskTemplates = mysqlTable(
     title: varchar("title", { length: 220 }).notNull(),
     description: text("description"),
     priority: mysqlEnum("priority", ["normal", "urgent", "critical"]).default("normal").notNull(),
+    recurrenceType: mysqlEnum("recurrenceType", ["daily", "workdays", "weekly"]).default("daily").notNull(),
+    recurrenceDays: varchar("recurrenceDays", { length: 20 }),
     defaultDueTime: varchar("defaultDueTime", { length: 5 }),
     startDate: date("startDate").notNull(),
     endDate: date("endDate"),

@@ -1,0 +1,2 @@
+ALTER TABLE `daily_task_templates` ADD `recurrenceType` enum('daily','workdays','weekly') DEFAULT 'daily' NOT NULL;--> statement-breakpoint
+ALTER TABLE `daily_task_templates` ADD `recurrenceDays` varchar(20);
