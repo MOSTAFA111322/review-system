@@ -357,6 +357,7 @@ export const dailyTasks = mysqlTable(
     reviewId: int("reviewId").references(() => reviews.id, { onDelete: "set null" }),
     title: varchar("title", { length: 220 }).notNull(),
     description: text("description"),
+    notes: text("notes"),
     taskDate: date("taskDate").notNull(),
     dueTime: varchar("dueTime", { length: 5 }),
     priority: mysqlEnum("priority", ["normal", "urgent", "critical"]).default("normal").notNull(),

@@ -98,7 +98,7 @@ export const dailyTasksRouter = router({
       if (input.employeeId && input.employeeId !== employee.id) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك عرض مهام موظف آخر." });
       conditions.push(eq(dailyTasks.employeeId, employee.id));
     }
-    return db.select({ id: dailyTasks.id, fiscalYearId: dailyTasks.fiscalYearId, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, templateId: dailyTasks.templateId, reviewId: dailyTasks.reviewId, title: dailyTasks.title, description: dailyTasks.description, taskDate: dailyTasks.taskDate, dueTime: dailyTasks.dueTime, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, completedAt: dailyTasks.completedAt }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...conditions)).orderBy(desc(dailyTasks.taskDate), asc(employees.displayName), asc(dailyTasks.title));
+    return db.select({ id: dailyTasks.id, fiscalYearId: dailyTasks.fiscalYearId, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, templateId: dailyTasks.templateId, reviewId: dailyTasks.reviewId, title: dailyTasks.title, description: dailyTasks.description, notes: dailyTasks.notes, taskDate: dailyTasks.taskDate, dueTime: dailyTasks.dueTime, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, completedAt: dailyTasks.completedAt }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...conditions)).orderBy(desc(dailyTasks.taskDate), asc(employees.displayName), asc(dailyTasks.title));
   }),
 
   createExtra: protectedProcedure.input(z.object({
@@ -110,6 +110,7 @@ export const dailyTasksRouter = router({
     taskDate: dateText,
     dueTime: z.string().regex(/^([01]\\d|2[0-3]):[0-5]\\d$/).optional(),
     priority: priority.default("normal"),
+    notes: z.string().trim().max(5000).optional(),
   })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
@@ -121,7 +122,7 @@ export const dailyTasksRouter = router({
       if (!review || review.fiscalYearId !== input.fiscalYearId) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة ضمن السنة المالية." });
       if (review.assignedEmployeeId !== input.employeeId) throw new TRPCError({ code: "BAD_REQUEST", message: "الموظف المحدد ليس الموظف المكلف بالمراجعة." });
     }
-    const [result] = await db.insert(dailyTasks).values({ fiscalYearId: input.fiscalYearId, employeeId: input.employeeId, reviewId: input.reviewId ?? null, title: input.title, description: input.description, taskDate: new Date(`${input.taskDate}T00:00:00.000Z`), dueTime: input.dueTime, priority: input.priority, source: input.reviewId ? "review" : "manual", createdByUserId: ctx.user.id });
+    const [result] = await db.insert(dailyTasks).values({ fiscalYearId: input.fiscalYearId, employeeId: input.employeeId, reviewId: input.reviewId ?? null, title: input.title, description: input.description, notes: input.notes, taskDate: new Date(`${input.taskDate}T00:00:00.000Z`), dueTime: input.dueTime, priority: input.priority, source: input.reviewId ? "review" : "manual", createdByUserId: ctx.user.id });
     return { id: Number(result.insertId) };
   }),
 
@@ -142,13 +143,18 @@ export const dailyTasksRouter = router({
     const employeeIds = Array.from(new Set(input.rows.map(row => row.employeeId)));
     const activeEmployees = await db.select({ id: employees.id }).from(employees).where(and(eq(employees.isActive, true), inArray(employees.id, employeeIds)));
     if (activeEmployees.length !== employeeIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "يحتوي الملف على موظف غير موجود أو غير نشط." });
-    const keys = input.rows.map(row => `${row.employeeId}|${row.taskDate}|${row.title.toLocaleLowerCase("ar")}`);
+    const normalizeKey = (employeeId: number, taskDate: string, title: string) => `${employeeId}|${taskDate}|${title.trim().toLocaleLowerCase("ar")}`;
+    const keys = input.rows.map(row => normalizeKey(row.employeeId, row.taskDate, row.title));
     if (new Set(keys).size !== keys.length) throw new TRPCError({ code: "BAD_REQUEST", message: "يوجد تكرار داخل ملف الاستيراد لنفس الموظف والتاريخ والمهمة." });
+    const existing = await db.select({ employeeId: dailyTasks.employeeId, taskDate: dailyTasks.taskDate, title: dailyTasks.title }).from(dailyTasks).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), inArray(dailyTasks.employeeId, employeeIds)));
+    const existingKeys = new Set(existing.map(row => normalizeKey(row.employeeId, row.taskDate.toISOString().slice(0, 10), row.title)));
+    const repeatedRows = input.rows.filter(row => existingKeys.has(normalizeKey(row.employeeId, row.taskDate, row.title)));
+    if (repeatedRows.length > 0) throw new TRPCError({ code: "CONFLICT", message: `يوجد ${repeatedRows.length} من المهام موجودة مسبقًا. لم يتم استيراد أي صف لتجنب التكرار.` });
     await db.insert(dailyTasks).values(input.rows.map(row => ({ ...row, fiscalYearId: input.fiscalYearId, taskDate: new Date(`${row.taskDate}T00:00:00.000Z`), source: "imported" as const, createdByUserId: ctx.user.id })));
     return { imported: input.rows.length };
   }),
 
-  updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status })).mutation(async ({ ctx, input }) => {
+  updateStatus: protectedProcedure.input(z.object({ id: z.number().int().positive(), status, notes: z.string().trim().max(5000).optional() })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_UPDATE);
     const db = await database();
     const [task] = await db.select().from(dailyTasks).where(eq(dailyTasks.id, input.id)).limit(1);
@@ -159,7 +165,7 @@ export const dailyTasksRouter = router({
       const employee = await linkedEmployee(ctx.user.id);
       if (!employee || employee.id !== task.employeeId) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك تحديث مهمة موظف آخر." });
     }
-    await db.update(dailyTasks).set({ status: input.status, completedAt: input.status === "completed" ? new Date() : null, completedByUserId: input.status === "completed" ? ctx.user.id : null }).where(eq(dailyTasks.id, input.id));
+    await db.update(dailyTasks).set({ status: input.status, notes: input.notes, completedAt: input.status === "completed" ? new Date() : null, completedByUserId: input.status === "completed" ? ctx.user.id : null }).where(eq(dailyTasks.id, input.id));
     return { success: true };
   }),
 
@@ -178,7 +184,7 @@ export const dailyTasksRouter = router({
     if (input.startDate) { const start = new Date(`${input.startDate}T00:00:00.000Z`); taskConditions.push(gte(dailyTasks.taskDate, start)); reviewConditions.push(gte(reviews.createdAt, start)); }
     if (input.endDate) { const end = new Date(`${input.endDate}T23:59:59.999Z`); taskConditions.push(lte(dailyTasks.taskDate, end)); reviewConditions.push(lte(reviews.createdAt, end)); }
     const [daily, reviewRows] = await Promise.all([
-      db.select({ id: dailyTasks.id, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, title: dailyTasks.title, taskDate: dailyTasks.taskDate, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, reviewId: dailyTasks.reviewId }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...taskConditions)).orderBy(desc(dailyTasks.taskDate)),
+      db.select({ id: dailyTasks.id, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, title: dailyTasks.title, notes: dailyTasks.notes, taskDate: dailyTasks.taskDate, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, reviewId: dailyTasks.reviewId }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...taskConditions)).orderBy(desc(dailyTasks.taskDate)),
       db.select({ id: reviews.id, internalRef: reviews.internalRef, title: reviews.title, dueDate: reviews.dueDate, priority: reviews.priority, employeeId: reviews.assignedEmployeeId, employeeName: employees.displayName, reviewerStatus: reviewerStatuses.name, employeeStatus: employeeStatuses.name, operationType: operationTypes.name }).from(reviews).leftJoin(employees, eq(reviews.assignedEmployeeId, employees.id)).innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id)).innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id)).innerJoin(operationTypes, eq(reviews.operationTypeId, operationTypes.id)).where(and(...reviewConditions)).orderBy(desc(reviews.createdAt)),
     ]);
     return { employeeId: employeeId ?? null, employeeName: daily[0]?.employeeName ?? reviewRows[0]?.employeeName ?? null, dailyTasks: daily, reviews: reviewRows };

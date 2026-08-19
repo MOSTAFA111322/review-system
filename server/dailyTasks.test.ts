@@ -16,6 +16,8 @@ describe("daily tasks import contract", () => {
     expect(source).toContain("requireFiscalYearAccess(ctx.user, input.fiscalYearId, true)");
     expect(source).toContain("يحتوي الملف على موظف غير موجود أو غير نشط");
     expect(source).toContain("يوجد تكرار داخل ملف الاستيراد");
+    expect(source).toContain("يوجد ${repeatedRows.length} من المهام موجودة مسبقًا");
+    expect(source).toContain("لم يتم استيراد أي صف لتجنب التكرار");
     expect(source).toContain('source: "imported"');
   });
 
