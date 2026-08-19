@@ -101,6 +101,30 @@ export const dailyTasksRouter = router({
     return db.select({ id: dailyTasks.id, fiscalYearId: dailyTasks.fiscalYearId, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, templateId: dailyTasks.templateId, reviewId: dailyTasks.reviewId, title: dailyTasks.title, description: dailyTasks.description, taskDate: dailyTasks.taskDate, dueTime: dailyTasks.dueTime, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, completedAt: dailyTasks.completedAt }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...conditions)).orderBy(desc(dailyTasks.taskDate), asc(employees.displayName), asc(dailyTasks.title));
   }),
 
+  createExtra: protectedProcedure.input(z.object({
+    fiscalYearId: z.number().int().positive(),
+    employeeId: z.number().int().positive(),
+    reviewId: z.number().int().positive().optional(),
+    title: z.string().trim().min(2).max(220),
+    description: z.string().trim().max(5000).optional(),
+    taskDate: dateText,
+    dueTime: z.string().regex(/^([01]\\d|2[0-3]):[0-5]\\d$/).optional(),
+    priority: priority.default("normal"),
+  })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
+    await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
+    const db = await database();
+    const [employee] = await db.select({ id: employees.id }).from(employees).where(and(eq(employees.id, input.employeeId), eq(employees.isActive, true))).limit(1);
+    if (!employee) throw new TRPCError({ code: "NOT_FOUND", message: "الموظف غير موجود أو غير نشط." });
+    if (input.reviewId) {
+      const [review] = await db.select({ id: reviews.id, fiscalYearId: reviews.fiscalYearId, assignedEmployeeId: reviews.assignedEmployeeId }).from(reviews).where(and(eq(reviews.id, input.reviewId), isNull(reviews.deletedAt), isNull(reviews.cancelledAt))).limit(1);
+      if (!review || review.fiscalYearId !== input.fiscalYearId) throw new TRPCError({ code: "NOT_FOUND", message: "المراجعة غير موجودة ضمن السنة المالية." });
+      if (review.assignedEmployeeId !== input.employeeId) throw new TRPCError({ code: "BAD_REQUEST", message: "الموظف المحدد ليس الموظف المكلف بالمراجعة." });
+    }
+    const [result] = await db.insert(dailyTasks).values({ fiscalYearId: input.fiscalYearId, employeeId: input.employeeId, reviewId: input.reviewId ?? null, title: input.title, description: input.description, taskDate: new Date(`${input.taskDate}T00:00:00.000Z`), dueTime: input.dueTime, priority: input.priority, source: input.reviewId ? "review" : "manual", createdByUserId: ctx.user.id });
+    return { id: Number(result.insertId) };
+  }),
+
   importBatch: protectedProcedure.input(z.object({
     fiscalYearId: z.number().int().positive(),
     rows: z.array(z.object({
