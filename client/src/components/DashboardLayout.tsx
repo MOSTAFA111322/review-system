@@ -30,6 +30,7 @@ import { useTheme } from "../contexts/ThemeContext";
 const navigation = [
   { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/" },
   { icon: ListChecks, label: "مهامي", path: "/my-tasks", permission: "reviews.view.assigned" },
+  { icon: ClipboardCheck, label: "المهام اليومية", path: "/daily-tasks", permission: "dailyTasks.view" },
   { icon: LayoutDashboard, label: "لوحة الأداء", path: "/dashboard" },
   { icon: FileBarChart, label: "الخلاصة والتقارير", path: "/reports" },
   { icon: Settings, label: "الإعدادات", path: "/settings", permission: "settings.manage" },

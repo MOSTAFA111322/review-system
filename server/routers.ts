@@ -2,6 +2,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 import { employeesRouter, rolesRouter, setupRouter, usersRouter } from "./routers/admin";
 import { analyticsRouter } from "./routers/analytics";
+import { dailyTasksRouter } from "./routers/dailyTasks";
 import { authRouter } from "./routers/auth";
 import { activityRouter, commentsRouter } from "./routers/collaboration";
 import { attachmentsRouter, customFieldsRouter, notificationsRouter } from "./routers/extendedFeatures";
@@ -26,6 +27,7 @@ export const appRouter = router({
   customFields: customFieldsRouter,
   notifications: notificationsRouter,
   analytics: analyticsRouter,
+  dailyTasks: dailyTasksRouter,
 });
 
 export type AppRouter = typeof appRouter;

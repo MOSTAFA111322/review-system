@@ -32,6 +32,9 @@ export const PERMISSIONS = {
   ATTACHMENTS_MANAGE: "attachments.manage",
   REPORTS_VIEW: "reports.view",
   REPORTS_EXPORT: "reports.export",
+  DAILY_TASKS_VIEW: "dailyTasks.view",
+  DAILY_TASKS_MANAGE: "dailyTasks.manage",
+  DAILY_TASKS_UPDATE: "dailyTasks.update",
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

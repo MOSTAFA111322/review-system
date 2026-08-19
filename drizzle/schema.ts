@@ -322,6 +322,59 @@ export const customFieldValues = mysqlTable(
   table => [uniqueIndex("custom_field_values_unique").on(table.reviewId, table.customFieldId)],
 );
 
+/** قالب مهمة يومية متكررة؛ لا ينشئ بيانات تشغيلية تلقائيًا قبل الاستيراد أو التفعيل. */
+export const dailyTaskTemplates = mysqlTable(
+  "daily_task_templates",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    employeeId: int("employeeId").notNull().references(() => employees.id, { onDelete: "restrict" }),
+    title: varchar("title", { length: 220 }).notNull(),
+    description: text("description"),
+    priority: mysqlEnum("priority", ["normal", "urgent", "critical"]).default("normal").notNull(),
+    defaultDueTime: varchar("defaultDueTime", { length: 5 }),
+    startDate: date("startDate").notNull(),
+    endDate: date("endDate"),
+    isActive: boolean("isActive").default(true).notNull(),
+    source: mysqlEnum("source", ["manual", "imported"]).default("manual").notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    index("daily_templates_fy_employee_idx").on(table.fiscalYearId, table.employeeId, table.isActive),
+    index("daily_templates_dates_idx").on(table.startDate, table.endDate),
+  ],
+);
+
+/** نسخة تشغيلية مؤرخة من قالب أو مهمة مضافة أثناء المراجعة. */
+export const dailyTasks = mysqlTable(
+  "daily_tasks",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    employeeId: int("employeeId").notNull().references(() => employees.id, { onDelete: "restrict" }),
+    templateId: int("templateId").references(() => dailyTaskTemplates.id, { onDelete: "set null" }),
+    reviewId: int("reviewId").references(() => reviews.id, { onDelete: "set null" }),
+    title: varchar("title", { length: 220 }).notNull(),
+    description: text("description"),
+    taskDate: date("taskDate").notNull(),
+    dueTime: varchar("dueTime", { length: 5 }),
+    priority: mysqlEnum("priority", ["normal", "urgent", "critical"]).default("normal").notNull(),
+    status: mysqlEnum("status", ["pending", "in_progress", "completed", "skipped"]).default("pending").notNull(),
+    source: mysqlEnum("source", ["recurring", "manual", "review", "imported"]).default("manual").notNull(),
+    completedAt: timestamp("completedAt"),
+    completedByUserId: int("completedByUserId").references(() => users.id, { onDelete: "set null" }),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    uniqueIndex("daily_tasks_template_date_unique").on(table.templateId, table.taskDate),
+    index("daily_tasks_fy_employee_date_idx").on(table.fiscalYearId, table.employeeId, table.taskDate),
+    index("daily_tasks_review_idx").on(table.reviewId),
+    index("daily_tasks_status_date_idx").on(table.status, table.taskDate),
+  ],
+);
+
 export const notifications = mysqlTable(
   "notifications",
   {
