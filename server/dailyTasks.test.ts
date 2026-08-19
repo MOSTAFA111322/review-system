@@ -39,6 +39,17 @@ describe("daily tasks import contract", () => {
     expect(section).toContain("byEmployee");
   });
 
+  it("يؤمن callback التنبيهات ويمنع تكرار الإشعارات ويقصر التقرير الأسبوعي على المديرين", () => {
+    const source = readFileSync(new URL("./scheduledDailyTaskAlerts.ts", import.meta.url), "utf8");
+    expect(source).toContain("user.isCron");
+    expect(source).toContain("scheduleCronTaskUid");
+    expect(source).toContain("daily_task.unupdated");
+    expect(source).toContain("daily_task.weekly_report");
+    expect(source).toContain("reports.view");
+    expect(source).toContain("isNull(notifications.readAt)");
+    expect(source).toContain("today.getUTCDay() === 1");
+  });
+
   it("يبقي التقرير الموحد مقيدًا بتصريح التقارير وبالسنة المالية", () => {
     const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
     const reportSection = source.slice(source.indexOf("unifiedReport:"));
