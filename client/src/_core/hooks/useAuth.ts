@@ -14,6 +14,7 @@ export function useAuth(options?: UseAuthOptions) {
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
+    refetchOnMount: "always",
   });
 
   const logoutMutation = trpc.auth.logout.useMutation({
@@ -63,6 +64,14 @@ export function useAuth(options?: UseAuthOptions) {
     logoutMutation.error,
     logoutMutation.isPending,
   ]);
+
+  useEffect(() => {
+    const refreshAuthAfterHistoryRestore = () => {
+      void meQuery.refetch();
+    };
+    window.addEventListener("pageshow", refreshAuthAfterHistoryRestore);
+    return () => window.removeEventListener("pageshow", refreshAuthAfterHistoryRestore);
+  }, [meQuery.refetch]);
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;

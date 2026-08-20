@@ -18,6 +18,12 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const localLogin = trpc.auth.localLogin.useMutation({
     onSuccess: async () => {
+      // A preview token can outlive a local-account switch in the same browser.
+      // Clear it so the fresh local-login cookie is the only identity source.
+      try {
+        sessionStorage.removeItem("manus-cookie");
+      } catch {}
+      utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
       setLocation("/");
     },
