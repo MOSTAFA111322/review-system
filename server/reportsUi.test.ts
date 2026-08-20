@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const reportsSource = readFileSync(path.resolve(process.cwd(), "client/src/pages/Reports.tsx"), "utf8");
+const stylesSource = readFileSync(path.resolve(process.cwd(), "client/src/index.css"), "utf8");
 
 describe("واجهة تصدير التقرير الأسبوعي", () => {
   it("تعرض زرًا مستقلًا للتقرير الأسبوعي مع حالة تحميل وإيقاف عند غياب البيانات", () => {
@@ -29,3 +30,11 @@ describe("واجهة تصدير التقرير الأسبوعي", () => {
   });
 });
 
+
+  it("تتيح استعراض وطباعة التقرير العام والتقرير الأسبوعي مع تحديد القسم المطلوب للطباعة", () => {
+    expect(reportsSource).toContain("printReport");
+    expect(reportsSource).toContain('printTarget === "reviews"');
+    expect(reportsSource).toContain('printTarget === "weekly"');
+    expect(reportsSource).toContain("طباعة التقرير");
+    expect(stylesSource).toContain("main:has(.print-active)");
+  });

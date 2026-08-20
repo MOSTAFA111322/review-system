@@ -313,3 +313,24 @@
     background: white !important;
   }
 }
+
+
+@media print {
+  main:has(.print-active) > *:not(.print-active) {
+    display: none !important;
+  }
+
+  main:has(.print-active) > .print-active {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+
+  .print-active .print-exclude {
+    display: none !important;
+  }
+}
