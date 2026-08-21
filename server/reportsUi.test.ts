@@ -38,3 +38,25 @@ describe("واجهة تصدير التقرير الأسبوعي", () => {
     expect(reportsSource).toContain("طباعة التقرير");
     expect(stylesSource).toContain("main:has(.print-active)");
   });
+
+
+describe("عزل إعدادات التقارير عن الطباعة", () => {
+  it("تستخدم صفحات التقارير حاويات طباعة وقسمًا نشطًا واضحًا", () => {
+    expect(reportsSource).toContain("reports-print-root");
+    expect(reportsSource).toContain("print-exclude rounded-2xl border-indigo-100");
+    expect(reportsSource).toContain("print-exclude mb-4 rounded-xl");
+  });
+
+  it("تعزل صفحة المهام اليومية التقرير المختار وتخفي عناصر التحكم", () => {
+    const dailyTasksSource = readFileSync(path.resolve(process.cwd(), "client/src/pages/DailyTasks.tsx"), "utf8");
+    expect(dailyTasksSource).toContain("daily-tasks-print-root");
+    expect(dailyTasksSource).toContain('print-section ${!reportOpen ? "print-active" : ""}');
+    expect(dailyTasksSource).toContain("print-section print-active");
+  });
+
+  it("تخفي CSS عناصر الإعدادات والتحكم في نسخة الطباعة", () => {
+    expect(stylesSource).toContain(".reports-print-root:has(.print-active)");
+    expect(stylesSource).toContain(".daily-tasks-print-root .print-active fieldset");
+    expect(stylesSource).toContain(".reports-print-root .print-active button");
+  });
+});

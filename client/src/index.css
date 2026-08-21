@@ -334,3 +334,41 @@
     display: none !important;
   }
 }
+
+/* تقارير الطباعة: لا نطبع أدوات الإعداد أو أي قسم غير التقرير المختار. */
+@media print {
+  .reports-print-root:has(.print-active) > *:not(.print-active),
+  .daily-tasks-print-root:has(.print-active) > *:not(.print-active) {
+    display: none !important;
+  }
+
+  .reports-print-root:has(.print-active) > .print-active,
+  .daily-tasks-print-root:has(.print-active) > .print-active {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  .reports-print-root .print-exclude,
+  .daily-tasks-print-root .print-exclude,
+  .reports-print-root .print-active fieldset,
+  .daily-tasks-print-root .print-active fieldset {
+    display: none !important;
+  }
+
+  .reports-print-root .print-active input,
+  .reports-print-root .print-active select,
+  .reports-print-root .print-active textarea,
+  .daily-tasks-print-root .print-active input,
+  .daily-tasks-print-root .print-active select,
+  .daily-tasks-print-root .print-active textarea,
+  .reports-print-root .print-active button,
+  .daily-tasks-print-root .print-active button {
+    display: none !important;
+  }
+}
