@@ -22,10 +22,12 @@ export default function Login() {
       // Clear it so the fresh local-login cookie is the only identity source.
       try {
         sessionStorage.removeItem("manus-cookie");
+        localStorage.removeItem("manus-runtime-user-info");
       } catch {}
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
-      setLocation("/");
+      // Force a clean document so no route/query cache from the previous account can render.
+      window.location.replace("/");
     },
     onError: issue => setError(issue.message || "تعذر تسجيل الدخول. تحقق من بياناتك ثم أعد المحاولة."),
   });
