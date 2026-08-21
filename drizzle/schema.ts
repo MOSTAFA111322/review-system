@@ -1,6 +1,7 @@
 import {
   boolean,
   date,
+  decimal,
   index,
   int,
   json,
@@ -379,9 +380,57 @@ export const dailyTasks = mysqlTable(
   ],
 );
 
-export const notifications = mysqlTable(
-  "notifications",
+/** كشف متابعة فقط لإفادة سداد الإيجار، تأكيد المالك، ومرجع الترحيل إلى إملاكي. لا يمثل سند قبض أو قيدًا محاسبيًا. */
+export const rentPaymentFollowUps = mysqlTable(
+  "rent_payment_follow_ups",
   {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    buildingName: varchar("buildingName", { length: 180 }).notNull(),
+    apartmentNumber: varchar("apartmentNumber", { length: 80 }).notNull(),
+    tenantName: varchar("tenantName", { length: 180 }).notNull(),
+    paidAmount: decimal("paidAmount", { precision: 14, scale: 2 }).notNull(),
+    paymentDate: date("paymentDate").notNull(),
+    contractNumber: varchar("contractNumber", { length: 120 }),
+    /** رقم عقد داخلي مستقل عن الرقم الخارجي أو رقم العقد الوارد من إملاكي/Excel. */
+    internalContractNumber: varchar("internalContractNumber", { length: 120 }),
+    paymentAccountNumber: varchar("paymentAccountNumber", { length: 160 }),
+    ownerConfirmation: mysqlEnum("ownerConfirmation", ["pending", "confirmed", "needs_review"]).default("pending").notNull(),
+    ownerConfirmationDate: date("ownerConfirmationDate"),
+    amlakiaReceiptNumber: varchar("amlakiaReceiptNumber", { length: 120 }),
+    transferStatus: mysqlEnum("transferStatus", ["not_transferred", "transferred"]).default("not_transferred").notNull(),
+    notes: text("notes"),
+    sourceSheet: varchar("sourceSheet", { length: 180 }),
+    sourceRow: int("sourceRow"),
+    sourceFingerprint: varchar("sourceFingerprint", { length: 128 }),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    ...auditTimestamps,
+  },
+  table => [
+    index("rent_followups_fy_building_date_idx").on(table.fiscalYearId, table.buildingName, table.paymentDate),
+    index("rent_followups_fy_internal_contract_idx").on(table.fiscalYearId, table.internalContractNumber),
+    index("rent_followups_confirmation_idx").on(table.ownerConfirmation, table.transferStatus),
+    uniqueIndex("rent_followups_source_fingerprint_unique").on(table.sourceFingerprint),
+  ],
+);
+
+/** سجل تدقيق لتغييرات كشف متابعة الإيجارات، منفصل عن سجل المراجعات. */
+export const rentPaymentFollowUpActivity = mysqlTable(
+  "rent_payment_follow_up_activity",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    followUpId: int("followUpId").notNull().references(() => rentPaymentFollowUps.id, { onDelete: "cascade" }),
+    actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+    action: varchar("action", { length: 64 }).notNull(),
+    beforeValue: json("beforeValue"),
+    afterValue: json("afterValue"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [index("rent_followup_activity_followup_idx").on(table.followUpId, table.createdAt)],
+);
+
+export const notifications = mysqlTable("notifications", {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
     type: varchar("type", { length: 64 }).notNull(),

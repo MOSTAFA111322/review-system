@@ -1,0 +1,2 @@
+ALTER TABLE `rent_payment_follow_ups` ADD `internalContractNumber` varchar(120);--> statement-breakpoint
+CREATE INDEX `rent_followups_fy_internal_contract_idx` ON `rent_payment_follow_ups` (`fiscalYearId`,`internalContractNumber`);

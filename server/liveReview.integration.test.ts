@@ -24,13 +24,20 @@ describeWithLiveData("live review API acceptance — read-only", () => {
     expect(owner).toBeTruthy();
     if (!db || !owner) return;
 
-    const [year] = await db.select().from(fiscalYears).where(eq(fiscalYears.isCurrent, true)).limit(1);
-    const [actualReview] = await db.select().from(reviews).where(and(eq(reviews.fiscalYearId, year.id), isNull(reviews.deletedAt))).orderBy(desc(reviews.createdAt)).limit(1);
+    const [year] = await db.select().from(fiscalYears).where(eq(fiscalYears.status, "open")).limit(1);
     expect(year).toBeTruthy();
-    expect(actualReview).toBeTruthy();
-    if (!year || !actualReview) return;
+    if (!year) return;
 
     const caller = appRouter.createCaller(contextFor(owner));
+    const visible = await caller.reviews.list({ fiscalYearId: year.id, page: 1, pageSize: 5, sortBy: "createdAt", sortDirection: "asc" });
+    expect(visible.total).toBeGreaterThanOrEqual(1);
+    const visibleId = visible.items[0]?.id;
+    expect(visibleId).toBeTruthy();
+    if (!visibleId) return;
+    const [actualReview] = await db.select().from(reviews).where(and(eq(reviews.id, visibleId), eq(reviews.fiscalYearId, year.id), isNull(reviews.deletedAt), isNull(reviews.archivedAt), isNull(reviews.cancelledAt))).limit(1);
+    expect(actualReview).toBeTruthy();
+    if (!actualReview) return;
+
     const listed = await caller.reviews.list({
       fiscalYearId: year.id,
       page: 1,

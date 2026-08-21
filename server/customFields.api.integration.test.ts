@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { describe, expect, it } from "vitest";
-import { customFieldValues, customFields, employees, fiscalYears, operationTypeFields, reviews, roles, userFiscalYears, userRoles, users } from "../drizzle/schema";
+import { customFieldValues, customFields, employees, employeeStatuses, fiscalYears, operationTypes, operationTypeFields, reviewerStatuses, reviews, roles, userFiscalYears, userRoles, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import type { TrpcContext } from "./_core/context";
 import { getDb, getUserByOpenId } from "./db";
@@ -22,15 +22,15 @@ describeWithLiveData("custom field API behavior — temporary configuration is r
     if (!db || !owner) return;
 
     const [openYear] = await db.select().from(fiscalYears).where(eq(fiscalYears.status, "open")).limit(1);
-    const [review] = await db.select().from(reviews).where(and(eq(reviews.fiscalYearId, openYear.id), isNull(reviews.deletedAt))).orderBy(desc(reviews.createdAt)).limit(1);
     expect(openYear).toBeTruthy();
-    expect(review).toBeTruthy();
-    if (!openYear || !review) return;
+    if (!openYear) return;
 
     const runId = nanoid(10);
     const employeeOpenId = `qa-custom-employee-${runId}`;
     const keys = [`qa_required_number_${runId}`, `qa_employee_ref_${runId}`];
     let employeeUserId: number | undefined;
+    let operationTypeId: number | undefined;
+    let reviewId: number | undefined;
     let fieldIds: number[] = [];
     try {
       const [employeeRole] = await db.select().from(roles).where(eq(roles.code, "employee")).limit(1);
@@ -44,6 +44,19 @@ describeWithLiveData("custom field API behavior — temporary configuration is r
       await db.insert(userRoles).values({ userId: temporaryUser.id, roleId: employeeRole.id, assignedByUserId: owner.id });
       await db.insert(userFiscalYears).values({ userId: temporaryUser.id, fiscalYearId: openYear.id });
       await db.insert(employees).values({ userId: temporaryUser.id, displayName: `QA custom field employee ${runId}`, isActive: true });
+
+      const [baseReviewerStatus] = await db.select().from(reviewerStatuses).where(eq(reviewerStatuses.isActive, true)).orderBy(asc(reviewerStatuses.sortOrder)).limit(1);
+      const [baseEmployeeStatus] = await db.select().from(employeeStatuses).where(eq(employeeStatuses.isActive, true)).orderBy(asc(employeeStatuses.sortOrder)).limit(1);
+      expect(baseReviewerStatus).toBeTruthy();
+      expect(baseEmployeeStatus).toBeTruthy();
+      if (!baseReviewerStatus || !baseEmployeeStatus) return;
+      const operationTypeInsert = await db.insert(operationTypes).values({ name: `QA custom fields ${runId}`, description: "نوع مؤقت لاختبار الحقول المخصصة", color: "#64748b", sortOrder: 9990 });
+      operationTypeId = Number(operationTypeInsert[0].insertId);
+      const reviewInsert = await db.insert(reviews).values({ internalRef: `QA-${Date.now()}-${runId}`, title: `QA custom field review ${runId}`, description: "مراجعة مؤقتة للاختبار", problem: null, requiredAction: null, fiscalYearId: openYear.id, operationTypeId, reviewerStatusId: baseReviewerStatus.id, employeeStatusId: baseEmployeeStatus.id, assignedEmployeeId: null, priority: "normal", dueDate: null, createdByUserId: owner.id });
+      reviewId = Number(reviewInsert[0].insertId);
+      const [review] = await db.select().from(reviews).where(eq(reviews.id, reviewId)).limit(1);
+      expect(review).toBeTruthy();
+      if (!review) return;
 
       await db.insert(customFields).values([
         { key: keys[0], label: "QA required number", type: "number", isRequired: true, isActive: true, sortOrder: 9990 },
@@ -69,6 +82,8 @@ describeWithLiveData("custom field API behavior — temporary configuration is r
         await db.delete(operationTypeFields).where(inArray(operationTypeFields.customFieldId, fieldIds));
         await db.delete(customFields).where(inArray(customFields.id, fieldIds));
       }
+      if (reviewId) await db.delete(reviews).where(eq(reviews.id, reviewId));
+      if (operationTypeId) await db.delete(operationTypes).where(eq(operationTypes.id, operationTypeId));
       if (employeeUserId) {
         await db.delete(employees).where(eq(employees.userId, employeeUserId));
         await db.delete(users).where(eq(users.id, employeeUserId));

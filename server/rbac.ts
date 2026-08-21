@@ -35,6 +35,10 @@ export const PERMISSIONS = {
   DAILY_TASKS_VIEW: "dailyTasks.view",
   DAILY_TASKS_MANAGE: "dailyTasks.manage",
   DAILY_TASKS_UPDATE: "dailyTasks.update",
+  RENT_FOLLOWUPS_VIEW: "rentFollowUps.view",
+  RENT_FOLLOWUPS_CREATE: "rentFollowUps.create",
+  RENT_FOLLOWUPS_UPDATE: "rentFollowUps.update",
+  RENT_FOLLOWUPS_EXPORT: "rentFollowUps.export",
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

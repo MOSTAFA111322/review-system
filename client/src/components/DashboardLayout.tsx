@@ -22,7 +22,7 @@ import {
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
-import {   Bell, ClipboardCheck, FileBarChart, LayoutDashboard, ListChecks, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
+import {   Bell, ClipboardCheck, FileBarChart, FileSpreadsheet, LayoutDashboard, ListChecks, LogOut, Moon, Settings, Sun, Users } from "lucide-react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { useTheme } from "../contexts/ThemeContext";
@@ -31,6 +31,7 @@ const navigation = [
   { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/" },
   { icon: ListChecks, label: "مهامي", path: "/my-tasks", permission: "reviews.view.assigned" },
   { icon: ClipboardCheck, label: "المهام اليومية", path: "/daily-tasks", permission: "dailyTasks.view" },
+  { icon: FileSpreadsheet, label: "متابعة سداد الإيجارات", path: "/rent-follow-ups", permission: "rentFollowUps.view" },
   { icon: LayoutDashboard, label: "لوحة الأداء", path: "/dashboard" },
   { icon: FileBarChart, label: "الخلاصة والتقارير", path: "/reports" },
   { icon: Settings, label: "الإعدادات", path: "/settings", permission: "settings.manage" },

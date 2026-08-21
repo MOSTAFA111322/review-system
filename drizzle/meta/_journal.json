@@ -71,6 +71,27 @@
       "when": 1787173674322,
       "tag": "0009_purple_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787347733201,
+      "tag": "0010_complete_mesmero",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787348397737,
+      "tag": "0011_loving_mach_iv",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787348700932,
+      "tag": "0012_petite_chat",
+      "breakpoints": true
     }
   ]
 }
