@@ -59,6 +59,9 @@ export const rentFollowUpsRouter = router({
   list: protectedProcedure.input(z.object({
     fiscalYearId: z.number().int().positive(),
     buildingName: z.string().trim().optional(),
+    buildingId: z.number().int().positive().optional(),
+    unitId: z.number().int().positive().optional(),
+    contractId: z.number().int().positive().optional(),
     ownerConfirmation: confirmationSchema.optional(),
     transferStatus: transferSchema.optional(),
     fromDate: z.string().date().optional(),
@@ -70,6 +73,9 @@ export const rentFollowUpsRouter = router({
     const db = await database();
     const conditions = [eq(rentPaymentFollowUps.fiscalYearId, input.fiscalYearId)];
     if (input.buildingName) conditions.push(eq(rentPaymentFollowUps.buildingName, input.buildingName));
+    if (input.buildingId) conditions.push(eq(rentPaymentFollowUps.buildingId, input.buildingId));
+    if (input.unitId) conditions.push(eq(rentPaymentFollowUps.unitId, input.unitId));
+    if (input.contractId) conditions.push(eq(rentPaymentFollowUps.contractId, input.contractId));
     if (input.ownerConfirmation) conditions.push(eq(rentPaymentFollowUps.ownerConfirmation, input.ownerConfirmation));
     if (input.transferStatus) conditions.push(eq(rentPaymentFollowUps.transferStatus, input.transferStatus));
     if (input.fromDate) conditions.push(gte(rentPaymentFollowUps.paymentDate, asDate(input.fromDate)!));
