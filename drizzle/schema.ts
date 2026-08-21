@@ -483,6 +483,56 @@ export const rentPaymentFollowUps = mysqlTable(
   ],
 );
 
+/** ملاك العقارات، منفصلون عن شركة الإدارة وعن كشف المتابعة. */
+export const rentOwners = mysqlTable(
+  "rent_owners",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 180 }).notNull(),
+    contactPhone: varchar("contactPhone", { length: 80 }),
+    paymentAccountNumber: varchar("paymentAccountNumber", { length: 160 }),
+    notes: text("notes"),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    uniqueIndex("rent_owners_fy_name_unique").on(table.fiscalYearId, table.name),
+    index("rent_owners_fy_active_idx").on(table.fiscalYearId, table.isActive),
+  ],
+);
+
+/** تسويات مالية منفصلة عن كشف المتابعة: توثق المستحق للمالك وأتعاب شركة الإدارة. */
+export const rentSettlements = mysqlTable(
+  "rent_settlements",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    ownerId: int("ownerId").notNull().references(() => rentOwners.id, { onDelete: "restrict" }),
+    followUpId: int("followUpId").references(() => rentPaymentFollowUps.id, { onDelete: "restrict" }),
+    contractId: int("contractId").references(() => rentContracts.id, { onDelete: "restrict" }),
+    grossAmount: decimal("grossAmount", { precision: 14, scale: 2 }).notNull(),
+    managementFee: decimal("managementFee", { precision: 14, scale: 2 }).default("0").notNull(),
+    ownerNetAmount: decimal("ownerNetAmount", { precision: 14, scale: 2 }).notNull(),
+    beneficiary: mysqlEnum("beneficiary", ["owner", "management_company"]).default("owner").notNull(),
+    paymentMethod: varchar("paymentMethod", { length: 80 }),
+    settlementDate: date("settlementDate").notNull(),
+    status: mysqlEnum("status", ["pending", "settled", "cancelled"]).default("pending").notNull(),
+    notes: text("notes"),
+    sourceFingerprint: varchar("sourceFingerprint", { length: 128 }),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    ...auditTimestamps,
+  },
+  table => [
+    index("rent_settlements_fy_owner_date_idx").on(table.fiscalYearId, table.ownerId, table.settlementDate),
+    index("rent_settlements_followup_idx").on(table.followUpId),
+    index("rent_settlements_status_idx").on(table.fiscalYearId, table.status),
+    uniqueIndex("rent_settlements_source_fingerprint_unique").on(table.sourceFingerprint),
+  ],
+);
+
 /** سجل تدقيق لتغييرات كشف متابعة الإيجارات، منفصل عن سجل المراجعات. */
 export const rentPaymentFollowUpActivity = mysqlTable(
   "rent_payment_follow_up_activity",

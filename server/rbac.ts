@@ -39,6 +39,11 @@ export const PERMISSIONS = {
   RENT_FOLLOWUPS_CREATE: "rentFollowUps.create",
   RENT_FOLLOWUPS_UPDATE: "rentFollowUps.update",
   RENT_FOLLOWUPS_EXPORT: "rentFollowUps.export",
+  RENT_OWNERS_VIEW: "rentOwners.view",
+  RENT_OWNERS_MANAGE: "rentOwners.manage",
+  RENT_SETTLEMENTS_VIEW: "rentSettlements.view",
+  RENT_SETTLEMENTS_MANAGE: "rentSettlements.manage",
+  RENT_SETTLEMENTS_EXPORT: "rentSettlements.export",
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
