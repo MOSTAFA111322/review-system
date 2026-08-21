@@ -380,12 +380,79 @@ export const dailyTasks = mysqlTable(
   ],
 );
 
+/** مرجع العمارات القابل للإدارة ضمن السنة المالية. */
+export const rentBuildings = mysqlTable(
+  "rent_buildings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 180 }).notNull(),
+    code: varchar("code", { length: 80 }),
+    address: varchar("address", { length: 300 }),
+    notes: text("notes"),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    uniqueIndex("rent_buildings_fy_name_unique").on(table.fiscalYearId, table.name),
+    index("rent_buildings_fy_active_idx").on(table.fiscalYearId, table.isActive),
+  ],
+);
+
+/** الوحدات التابعة لعمارة، مع بيانات المستأجر الحالية لتسريع إدخال السداد. */
+export const rentUnits = mysqlTable(
+  "rent_units",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    buildingId: int("buildingId").notNull().references(() => rentBuildings.id, { onDelete: "restrict" }),
+    unitNumber: varchar("unitNumber", { length: 80 }).notNull(),
+    tenantName: varchar("tenantName", { length: 180 }),
+    paymentAccountNumber: varchar("paymentAccountNumber", { length: 160 }),
+    notes: text("notes"),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    uniqueIndex("rent_units_building_number_unique").on(table.buildingId, table.unitNumber),
+    index("rent_units_building_active_idx").on(table.buildingId, table.isActive),
+  ],
+);
+
+/** العقود المرجعية للوحدة؛ يسمح بأكثر من عقد تاريخيًا مع رقم داخلي فريد داخل السنة والوحدة. */
+export const rentContracts = mysqlTable(
+  "rent_contracts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    unitId: int("unitId").notNull().references(() => rentUnits.id, { onDelete: "restrict" }),
+    externalContractNumber: varchar("externalContractNumber", { length: 120 }),
+    internalContractNumber: varchar("internalContractNumber", { length: 120 }),
+    tenantName: varchar("tenantName", { length: 180 }),
+    startDate: date("startDate"),
+    endDate: date("endDate"),
+    notes: text("notes"),
+    isActive: boolean("isActive").default(true).notNull(),
+    createdByUserId: int("createdByUserId").notNull().references(() => users.id, { onDelete: "restrict" }),
+    ...auditTimestamps,
+  },
+  table => [
+    uniqueIndex("rent_contracts_fy_unit_internal_unique").on(table.fiscalYearId, table.unitId, table.internalContractNumber),
+    index("rent_contracts_fy_active_idx").on(table.fiscalYearId, table.isActive),
+    index("rent_contracts_unit_idx").on(table.unitId),
+  ],
+);
+
 /** كشف متابعة فقط لإفادة سداد الإيجار، تأكيد المالك، ومرجع الترحيل إلى إملاكي. لا يمثل سند قبض أو قيدًا محاسبيًا. */
 export const rentPaymentFollowUps = mysqlTable(
   "rent_payment_follow_ups",
   {
     id: int("id").autoincrement().primaryKey(),
     fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "restrict" }),
+    buildingId: int("buildingId").references(() => rentBuildings.id, { onDelete: "restrict" }),
+    unitId: int("unitId").references(() => rentUnits.id, { onDelete: "restrict" }),
+    contractId: int("contractId").references(() => rentContracts.id, { onDelete: "restrict" }),
     buildingName: varchar("buildingName", { length: 180 }).notNull(),
     apartmentNumber: varchar("apartmentNumber", { length: 80 }).notNull(),
     tenantName: varchar("tenantName", { length: 180 }).notNull(),
@@ -409,6 +476,7 @@ export const rentPaymentFollowUps = mysqlTable(
   },
   table => [
     index("rent_followups_fy_building_date_idx").on(table.fiscalYearId, table.buildingName, table.paymentDate),
+    index("rent_followups_entity_refs_idx").on(table.fiscalYearId, table.buildingId, table.unitId, table.contractId),
     index("rent_followups_fy_internal_contract_idx").on(table.fiscalYearId, table.internalContractNumber),
     index("rent_followups_confirmation_idx").on(table.ownerConfirmation, table.transferStatus),
     uniqueIndex("rent_followups_source_fingerprint_unique").on(table.sourceFingerprint),

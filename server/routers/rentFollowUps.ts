@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { fiscalYears, rentPaymentFollowUps } from "../../drizzle/schema";
+import { fiscalYears, rentBuildings, rentContracts, rentPaymentFollowUps, rentUnits } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -17,6 +17,9 @@ async function database() {
 
 const paymentInput = z.object({
   fiscalYearId: z.number().int().positive(),
+  buildingId: z.number().int().positive().optional().nullable(),
+  unitId: z.number().int().positive().optional().nullable(),
+  contractId: z.number().int().positive().optional().nullable(),
   buildingName: z.string().trim().min(1).max(180),
   apartmentNumber: z.string().trim().min(1).max(80),
   tenantName: z.string().trim().min(1).max(180),
@@ -85,6 +88,18 @@ export const rentFollowUpsRouter = router({
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
     validateWorkflow(input);
     const db = await database();
+    if (input.buildingId) {
+      const [building] = await db.select({ id: rentBuildings.id }).from(rentBuildings).where(and(eq(rentBuildings.id, input.buildingId), eq(rentBuildings.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!building) throw new TRPCError({ code: "BAD_REQUEST", message: "العمارة لا تنتمي إلى السنة المالية المحددة." });
+    }
+    if (input.unitId) {
+      const [unit] = await db.select({ id: rentUnits.id, buildingId: rentUnits.buildingId }).from(rentUnits).innerJoin(rentBuildings, eq(rentUnits.buildingId, rentBuildings.id)).where(and(eq(rentUnits.id, input.unitId), eq(rentBuildings.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!unit || (input.buildingId && unit.buildingId !== input.buildingId)) throw new TRPCError({ code: "BAD_REQUEST", message: "الوحدة لا تتبع العمارة المحددة ضمن السنة المالية." });
+    }
+    if (input.contractId) {
+      const [contract] = await db.select({ id: rentContracts.id, unitId: rentContracts.unitId }).from(rentContracts).where(and(eq(rentContracts.id, input.contractId), eq(rentContracts.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!contract || (input.unitId && contract.unitId !== input.unitId)) throw new TRPCError({ code: "BAD_REQUEST", message: "العقد لا يتبع الوحدة المحددة ضمن السنة المالية." });
+    }
     const sourceFingerprint = fingerprint(input);
     const [existing] = await db.select({ id: rentPaymentFollowUps.id }).from(rentPaymentFollowUps).where(eq(rentPaymentFollowUps.sourceFingerprint, sourceFingerprint)).limit(1);
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "هذا السداد موجود مسبقًا وفق العمارة والشقة والمستأجر والمبلغ والتاريخ ورقم العقد." });
@@ -97,6 +112,18 @@ export const rentFollowUpsRouter = router({
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId, true);
     validateWorkflow(input);
     const db = await database();
+    if (input.buildingId) {
+      const [building] = await db.select({ id: rentBuildings.id }).from(rentBuildings).where(and(eq(rentBuildings.id, input.buildingId), eq(rentBuildings.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!building) throw new TRPCError({ code: "BAD_REQUEST", message: "العمارة لا تنتمي إلى السنة المالية المحددة." });
+    }
+    if (input.unitId) {
+      const [unit] = await db.select({ id: rentUnits.id, buildingId: rentUnits.buildingId }).from(rentUnits).innerJoin(rentBuildings, eq(rentUnits.buildingId, rentBuildings.id)).where(and(eq(rentUnits.id, input.unitId), eq(rentBuildings.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!unit || (input.buildingId && unit.buildingId !== input.buildingId)) throw new TRPCError({ code: "BAD_REQUEST", message: "الوحدة لا تتبع العمارة المحددة ضمن السنة المالية." });
+    }
+    if (input.contractId) {
+      const [contract] = await db.select({ id: rentContracts.id, unitId: rentContracts.unitId }).from(rentContracts).where(and(eq(rentContracts.id, input.contractId), eq(rentContracts.fiscalYearId, input.fiscalYearId))).limit(1);
+      if (!contract || (input.unitId && contract.unitId !== input.unitId)) throw new TRPCError({ code: "BAD_REQUEST", message: "العقد لا يتبع الوحدة المحددة ضمن السنة المالية." });
+    }
     const [existing] = await db.select().from(rentPaymentFollowUps).where(eq(rentPaymentFollowUps.id, input.id)).limit(1);
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "سجل السداد غير موجود." });
     const { id, paymentDate, ownerConfirmationDate, ...changes } = input;

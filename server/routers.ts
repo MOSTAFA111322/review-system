@@ -9,6 +9,7 @@ import { attachmentsRouter, customFieldsRouter, notificationsRouter } from "./ro
 import { fiscalYearsRouter } from "./routers/fiscalYears";
 import { reviewsRouter } from "./routers/reviews";
 import { rentFollowUpsRouter } from "./routers/rentFollowUps";
+import { rentEntitiesRouter } from "./routers/rentEntities";
 import { settingsRouter } from "./routers/settings";
 
 export const appRouter = router({
@@ -30,6 +31,7 @@ export const appRouter = router({
   analytics: analyticsRouter,
   dailyTasks: dailyTasksRouter,
   rentFollowUps: rentFollowUpsRouter,
+  rentEntities: rentEntitiesRouter,
 });
 
 export type AppRouter = typeof appRouter;
