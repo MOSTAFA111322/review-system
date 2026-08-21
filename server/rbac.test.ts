@@ -44,6 +44,13 @@ describe("RBAC platform guard", () => {
     await expect(requirePermission(userWithRole("user"), PERMISSIONS.REPORTS_EXPORT)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("rejects a non-administrator from an administrative backend permission without writing data", async () => {
+    const select = vi.fn().mockReturnValue(permissionQuery([]));
+    vi.mocked(getDb).mockResolvedValue({ select } as never);
+    await expect(requirePermission(userWithRole("user"), PERMISSIONS.USERS_MANAGE)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks all write access to a closed fiscal year, including for the platform administrator", async () => {
     const select = vi.fn().mockReturnValue(limitQuery([{ id: 44, status: "closed" }]));
     vi.mocked(getDb).mockResolvedValue({ select } as never);
