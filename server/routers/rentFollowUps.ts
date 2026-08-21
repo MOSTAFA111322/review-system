@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { fiscalYears, rentBuildings, rentContracts, rentPaymentFollowUps, rentUnits } from "../../drizzle/schema";
+import { fiscalYears, rentBuildings, rentContracts, rentPaymentFollowUpActivity, rentPaymentFollowUps, rentUnits } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -43,6 +43,10 @@ function asDate(value: string | null | undefined) {
 
 function fingerprint(input: z.infer<typeof paymentInput>) {
   return [input.fiscalYearId, input.buildingName, input.apartmentNumber, input.tenantName, input.paidAmount, input.paymentDate, input.contractNumber ?? "", input.internalContractNumber ?? ""].join("|").toLowerCase();
+}
+
+async function createActivity(db: Awaited<ReturnType<typeof database>>, followUpId: number, actorUserId: number, action: string, beforeValue: unknown, afterValue: unknown) {
+  await db.insert(rentPaymentFollowUpActivity).values({ followUpId, actorUserId, action, beforeValue, afterValue });
 }
 
 function validateWorkflow(input: Pick<z.infer<typeof paymentInput>, "ownerConfirmation" | "ownerConfirmationDate" | "transferStatus" | "amlakiaReceiptNumber">) {
@@ -105,7 +109,9 @@ export const rentFollowUpsRouter = router({
     if (existing) throw new TRPCError({ code: "CONFLICT", message: "هذا السداد موجود مسبقًا وفق العمارة والشقة والمستأجر والمبلغ والتاريخ ورقم العقد." });
     const { paymentDate, ownerConfirmationDate, ...rest } = input;
     const result = await db.insert(rentPaymentFollowUps).values({ ...rest, paymentDate: asDate(paymentDate)!, ownerConfirmationDate: asDate(ownerConfirmationDate), sourceFingerprint, createdByUserId: ctx.user.id });
-    return { id: Number(result[0].insertId) };
+    const id = Number(result[0].insertId);
+    await createActivity(db, id, ctx.user.id, "created", null, { ...rest, paymentDate, ownerConfirmationDate });
+    return { id };
   }),
   update: protectedProcedure.input(paymentInput.extend({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.RENT_FOLLOWUPS_UPDATE);
@@ -128,6 +134,7 @@ export const rentFollowUpsRouter = router({
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "سجل السداد غير موجود." });
     const { id, paymentDate, ownerConfirmationDate, ...changes } = input;
     await db.update(rentPaymentFollowUps).set({ ...changes, paymentDate: asDate(paymentDate)!, ownerConfirmationDate: asDate(ownerConfirmationDate), sourceFingerprint: fingerprint(input), updatedByUserId: ctx.user.id }).where(eq(rentPaymentFollowUps.id, id));
+    await createActivity(db, id, ctx.user.id, "updated", existing, { ...changes, paymentDate, ownerConfirmationDate });
     return { success: true };
   }),
 });
