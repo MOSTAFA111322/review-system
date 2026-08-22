@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { and, eq, gte, isNull, lte, lt, ne } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, lt, ne } from "drizzle-orm";
 import {
   dailyTasks,
   employees,
@@ -26,30 +26,34 @@ function formatDate(value: Date) {
   return value.toISOString().slice(0, 10);
 }
 
-async function createUnreadNotification(
-  db: Awaited<ReturnType<typeof import("./db").getDb>>,
-  userId: number,
-  type: string,
-  title: string,
-  body: string,
-  link: string,
+type NotificationEntry = {
+  userId: number;
+  type: string;
+  title: string;
+  body: string;
+  link: string;
+};
+
+async function createUnreadNotifications(
+  db: NonNullable<Awaited<ReturnType<typeof import("./db").getDb>>>,
+  entries: NotificationEntry[],
 ) {
-  if (!db) return false;
-  const [existing] = await db
-    .select({ id: notifications.id })
+  if (entries.length === 0) return 0;
+
+  const uniqueEntries = Array.from(
+    new Map(entries.map(entry => [`${entry.userId}:${entry.type}:${entry.body}`, entry])).values(),
+  );
+  const userIds = Array.from(new Set(uniqueEntries.map(entry => entry.userId)));
+  const types = Array.from(new Set(uniqueEntries.map(entry => entry.type)));
+  const existing = await db
+    .select({ userId: notifications.userId, type: notifications.type, body: notifications.body })
     .from(notifications)
-    .where(
-      and(
-        eq(notifications.userId, userId),
-        eq(notifications.type, type),
-        eq(notifications.body, body),
-        isNull(notifications.readAt),
-      ),
-    )
-    .limit(1);
-  if (existing) return false;
-  await db.insert(notifications).values({ userId, type, title, body, link });
-  return true;
+    .where(and(inArray(notifications.userId, userIds), inArray(notifications.type, types), isNull(notifications.readAt)));
+  const existingKeys = new Set(existing.map(row => `${row.userId}:${row.type}:${row.body}`));
+  const pending = uniqueEntries.filter(entry => !existingKeys.has(`${entry.userId}:${entry.type}:${entry.body}`));
+  if (pending.length === 0) return 0;
+  await db.insert(notifications).values(pending);
+  return pending.length;
 }
 
 async function sendWeeklyManagerReport(db: NonNullable<Awaited<ReturnType<typeof import("./db").getDb>>>, fiscalYearId: number, weekStart: Date, weekEnd: Date) {
@@ -91,10 +95,16 @@ async function sendWeeklyManagerReport(db: NonNullable<Awaited<ReturnType<typeof
       .where(eq(users.isActive, true)),
   ]);
   const managerIds = Array.from(new Set([...admins, ...reportManagers].map(row => row.id)));
-  let created = 0;
-  for (const managerId of managerIds) {
-    if (await createUnreadNotification(db, managerId, "daily_task.weekly_report", "التقرير الأسبوعي للمهام اليومية", body, "/reports")) created += 1;
-  }
+  const created = await createUnreadNotifications(
+    db,
+    managerIds.map(managerId => ({
+      userId: managerId,
+      type: "daily_task.weekly_report",
+      title: "التقرير الأسبوعي للمهام اليومية",
+      body,
+      link: "/reports",
+    })),
+  );
   return { managers: managerIds.length, created, total: rows.length };
 }
 
@@ -136,17 +146,28 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
 
     const overdue = candidates.filter(task => task.taskDate < today);
     const unupdated = candidates.filter(task => task.updatedAt < staleThreshold);
-    let created = 0;
+    const entries: NotificationEntry[] = [];
     for (const task of overdue) {
       if (!task.employeeUserId) continue;
-      const body = `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — يلزم المتابعة`;
-      if (await createUnreadNotification(db, task.employeeUserId, "daily_task.overdue", "مهمة يومية متأخرة", body, "/daily-tasks")) created += 1;
+      entries.push({
+        userId: task.employeeUserId,
+        type: "daily_task.overdue",
+        title: "مهمة يومية متأخرة",
+        body: `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — يلزم المتابعة`,
+        link: "/daily-tasks",
+      });
     }
     for (const task of unupdated) {
       if (!task.employeeUserId) continue;
-      const body = `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — لم تُحدّث منذ أكثر من يوم`;
-      if (await createUnreadNotification(db, task.employeeUserId, "daily_task.unupdated", "مهمة يومية غير محدثة", body, "/daily-tasks")) created += 1;
+      entries.push({
+        userId: task.employeeUserId,
+        type: "daily_task.unupdated",
+        title: "مهمة يومية غير محدثة",
+        body: `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — لم تُحدّث منذ أكثر من يوم`,
+        link: "/daily-tasks",
+      });
     }
+    const created = await createUnreadNotifications(db, entries);
 
     let weeklyReport = null;
     if (today.getUTCDay() === 6) {
