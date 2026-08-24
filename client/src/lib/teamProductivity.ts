@@ -32,6 +32,9 @@ export type TeamProductivityMember = {
   dailyCompletionRate: number;
 };
 
+export type TeamProductivitySortKey = "employeeName" | "reviewCompletionRate" | "dailyCompletionRate" | "attentionItems" | "totalWorkload";
+export type TeamProductivitySortDirection = "asc" | "desc";
+
 const completionRate = (completed: number, total: number) => total ? Math.round((completed / total) * 100) : 0;
 
 export function summarizeTeamProductivity(reviewEmployees: ReviewProductivitySource[], dailyEmployees: DailyProductivitySource[]) {
@@ -84,4 +87,13 @@ export function summarizeTeamProductivity(reviewEmployees: ReviewProductivitySou
     dailyCompletionRate: completionRate(totals.dailyCompleted, totals.dailyTotal),
     employeesNeedingAttention: rows.filter(member => member.attentionItems > 0).length,
   };
+}
+
+export function sortTeamProductivityRows(rows: TeamProductivityMember[], key: TeamProductivitySortKey, direction: TeamProductivitySortDirection) {
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...rows].sort((first, second) => {
+    if (key === "employeeName") return first.employeeName.localeCompare(second.employeeName, "ar") * multiplier;
+    const difference = first[key] - second[key];
+    return difference ? difference * multiplier : first.employeeName.localeCompare(second.employeeName, "ar");
+  });
 }

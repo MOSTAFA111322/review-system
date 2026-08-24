@@ -86,11 +86,18 @@ export const rentFollowUpsRouter = router({
     }
     return db.select().from(rentPaymentFollowUps).where(and(...conditions)).orderBy(desc(rentPaymentFollowUps.paymentDate), desc(rentPaymentFollowUps.id));
   }),
-  summary: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+  summary: protectedProcedure.input(z.object({
+    fiscalYearId: z.number().int().positive(),
+    fromDate: z.string().date().optional(),
+    toDate: z.string().date().optional(),
+  }).refine(input => !input.fromDate || !input.toDate || input.fromDate <= input.toDate, { message: "نطاق الفترة غير صحيح." })).query(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.RENT_FOLLOWUPS_VIEW);
     await requireFiscalYearAccess(ctx.user, input.fiscalYearId);
     const db = await database();
-    const [totals] = await db.select({ totalRows: sql<number>`count(*)`, totalAmount: sql<string>`coalesce(sum(${rentPaymentFollowUps.paidAmount}), 0)`, pending: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'pending')`, confirmed: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'confirmed')`, needsReview: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'needs_review')`, notTransferred: sql<number>`sum(${rentPaymentFollowUps.transferStatus} = 'not_transferred')`, transferred: sql<number>`sum(${rentPaymentFollowUps.transferStatus} = 'transferred')` }).from(rentPaymentFollowUps).where(eq(rentPaymentFollowUps.fiscalYearId, input.fiscalYearId));
+    const conditions = [eq(rentPaymentFollowUps.fiscalYearId, input.fiscalYearId)];
+    if (input.fromDate) conditions.push(gte(rentPaymentFollowUps.paymentDate, asDate(input.fromDate)!));
+    if (input.toDate) conditions.push(lte(rentPaymentFollowUps.paymentDate, asDate(input.toDate)!));
+    const [totals] = await db.select({ totalRows: sql<number>`count(*)`, totalAmount: sql<string>`coalesce(sum(${rentPaymentFollowUps.paidAmount}), 0)`, pending: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'pending')`, confirmed: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'confirmed')`, needsReview: sql<number>`sum(${rentPaymentFollowUps.ownerConfirmation} = 'needs_review')`, notTransferred: sql<number>`sum(${rentPaymentFollowUps.transferStatus} = 'not_transferred')`, transferred: sql<number>`sum(${rentPaymentFollowUps.transferStatus} = 'transferred')` }).from(rentPaymentFollowUps).where(and(...conditions));
     return totals;
   }),
   create: protectedProcedure.input(paymentInput).mutation(async ({ ctx, input }) => {
