@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { calculateOverview, reportRows } from "./analytics";
 import { analyticsRouter, mondayOf, summarizeUserStats } from "./routers/analytics";
+import { dailyTasksRouter } from "./routers/dailyTasks";
+import { rentFollowUpsRouter } from "./routers/rentFollowUps";
 
 const now = new Date("2026-01-10T12:00:00.000Z");
 
@@ -31,5 +33,12 @@ describe("analytics", () => {
     expect(procedures.weeklyOverdue).toBeDefined();
     expect(procedures.export).toBeDefined();
     expect(procedures.userStats).toBeDefined();
+  });
+
+  it("يبقي عقود لوحة المدير على مؤشرات المراجعات والمهام والإيجارات المنفصلة", () => {
+    expect(analyticsRouter._def.procedures.overview).toBeDefined();
+    expect(analyticsRouter._def.procedures.weeklyOverdue).toBeDefined();
+    expect(dailyTasksRouter._def.procedures.operationalIndicators).toBeDefined();
+    expect(rentFollowUpsRouter._def.procedures.summary).toBeDefined();
   });
 });
