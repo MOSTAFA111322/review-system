@@ -38,7 +38,17 @@ describe("غلاف صفحة إدارة المستخدمين", () => {
 
   it("يوفر رابطًا واضحًا من الحسابات إلى دليل الموظفين لتعديل الاسم", () => {
     expect(usersPage).toContain('setLocation("/settings")');
-    expect(usersPage).toContain("تعديل أسماء الموظفين من دليل الموظفين");
+    expect(usersPage).toContain("دليل الموظفين والإعدادات");
+    expect(usersPage).toContain("تعديل الحساب");
+  });
+
+  it("يعرض أدوات إدارة الحساب المحلي والصلاحيات ونطاق السنوات والبحث", () => {
+    expect(usersPage).toContain("updateProfile");
+    expect(usersPage).toContain("setRoles");
+    expect(usersPage).toContain("setFiscalYears");
+    expect(usersPage).toContain('aria-label="البحث عن مستخدم"');
+    expect(usersPage).toContain("تعطيل");
+    expect(usersPage).toContain("تعديل الدخول");
   });
 
   it("يلون عناصر الفرز فوق جدول المراجعات بالبرتقالي محليًا دون تغيير حقول نموذج الإنشاء", () => {

@@ -39,10 +39,26 @@ export const usersRouter = router({
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
     const db = await database();
     const records = await db.select({ id: users.id, name: users.name, email: users.email, username: users.username, loginMethod: users.loginMethod, hasLocalPassword: sql<boolean>`${users.passwordHash} IS NOT NULL`, isActive: users.isActive, lastSignedIn: users.lastSignedIn, platformRole: users.role }).from(users);
-    const assignedRoles = await db.select({ userId: userRoles.userId, roleName: roles.name, roleCode: roles.code }).from(userRoles).innerJoin(roles, eq(userRoles.roleId, roles.id));
-    const byUser = new Map<number, { name: string; code: string }[]>();
-    for (const role of assignedRoles) byUser.set(role.userId, [...(byUser.get(role.userId) ?? []), { name: role.roleName, code: role.roleCode }]);
-    return records.map(user => ({ ...user, roles: byUser.get(user.id) ?? [] }));
+    const [assignedRoles, assignedFiscalYears] = await Promise.all([
+      db.select({ userId: userRoles.userId, roleId: userRoles.roleId, roleName: roles.name, roleCode: roles.code }).from(userRoles).innerJoin(roles, eq(userRoles.roleId, roles.id)),
+      db.select({ userId: userFiscalYears.userId, fiscalYearId: userFiscalYears.fiscalYearId }).from(userFiscalYears),
+    ]);
+    const byUser = new Map<number, { id: number; name: string; code: string }[]>();
+    for (const role of assignedRoles) byUser.set(role.userId, [...(byUser.get(role.userId) ?? []), { id: role.roleId, name: role.roleName, code: role.roleCode }]);
+    const yearsByUser = new Map<number, number[]>();
+    for (const year of assignedFiscalYears) yearsByUser.set(year.userId, [...(yearsByUser.get(year.userId) ?? []), year.fiscalYearId]);
+    return records.map(user => ({ ...user, roles: byUser.get(user.id) ?? [], fiscalYearIds: yearsByUser.get(user.id) ?? [] }));
+  }),
+  updateProfile: protectedProcedure.input(z.object({ userId: z.number().int().positive(), name: z.string().trim().min(2).max(180) })).mutation(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
+    const db = await database();
+    const [account] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, input.userId)).limit(1);
+    if (!account) throw new TRPCError({ code: "NOT_FOUND", message: "الحساب غير موجود." });
+    await db.transaction(async tx => {
+      await tx.update(users).set({ name: input.name, sessionVersion: sql`${users.sessionVersion} + 1` }).where(eq(users.id, input.userId));
+      await tx.update(employees).set({ displayName: input.name }).where(eq(employees.userId, input.userId));
+    });
+    return { success: true, changed: account.name !== input.name };
   }),
   setActive: protectedProcedure.input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
