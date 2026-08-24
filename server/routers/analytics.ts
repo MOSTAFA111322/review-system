@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gte, inArray, isNull, lt, lte } from "drizzle-orm";
 import { z } from "zod";
 import { calculateOverview, reportRows } from "../analytics";
-import { employees, employeeStatuses, operationTypes, reviewerStatuses, reviewActivityLog, reviews } from "../../drizzle/schema";
+import { employees, employeeStatuses, operationTypes, reviewerStatuses, reviewActivityLog, reviews, roles, userRoles, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -80,7 +80,36 @@ async function getWeeklyOverdue(user: AnalyticsUser, input: z.infer<typeof overd
   return { asOf: todayText, weeksBack: input.weeksBack, total: rows.reduce((sum, row) => sum + row.count, 0), rows };
 }
 
+export function summarizeUserStats(userRows: Array<{ id: number; isActive: boolean }>, roleRows: Array<{ userId: number; roleName: string }>) {
+  const roleCounts = new Map<string, number>();
+  const assignedUsers = new Set<number>();
+  for (const row of roleRows) {
+    roleCounts.set(row.roleName, (roleCounts.get(row.roleName) ?? 0) + 1);
+    assignedUsers.add(row.userId);
+  }
+  const unassignedCount = userRows.filter(row => !assignedUsers.has(row.id)).length;
+  if (unassignedCount) roleCounts.set("بدون دور", unassignedCount);
+  return {
+    total: userRows.length,
+    active: userRows.filter(row => row.isActive).length,
+    inactive: userRows.filter(row => !row.isActive).length,
+    roles: Array.from(roleCounts, ([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+  };
+}
+
+async function getUserStats(user: AnalyticsUser) {
+  if (user.role !== "admin" && !(await userHasPermission(user, PERMISSIONS.USERS_MANAGE))) return null;
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة حاليًا." });
+  const [userRows, roleRows] = await Promise.all([
+    db.select({ id: users.id, isActive: users.isActive }).from(users),
+    db.select({ userId: userRoles.userId, roleName: roles.name }).from(userRoles).innerJoin(roles, eq(userRoles.roleId, roles.id)),
+  ]);
+  return summarizeUserStats(userRows, roleRows);
+}
+
 export const analyticsRouter = router({
+  userStats: protectedProcedure.query(({ ctx }) => getUserStats(ctx.user)),
   overview: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return calculateOverview(rows, returnedIds); }),
   report: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return reportRows(rows, returnedIds); }),
   export: protectedProcedure.input(periodInput).query(async ({ ctx, input }) => { await requirePermission(ctx.user, PERMISSIONS.REPORTS_EXPORT); const { rows, returnedIds } = await getAnalyticsRows(ctx.user, input); return reportRows(rows, returnedIds); }),
