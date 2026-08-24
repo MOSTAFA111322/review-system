@@ -93,11 +93,13 @@ describeWithLiveData("live API role matrix — temporary identities are removed"
       await expect(employee.reviews.editOptions({ id: actualReview.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.reviews.changeStatus({ id: actualReview.id, side: "employee", toStatusId: 2_147_483_647 })).rejects.toMatchObject({ code: "FORBIDDEN" });
     } finally {
-      if (isolationYearId) await db.delete(fiscalYears).where(eq(fiscalYears.id, isolationYearId));
       if (createdIds.length) {
+        await db.delete(userFiscalYears).where(inArray(userFiscalYears.userId, createdIds));
+        await db.delete(userRoles).where(inArray(userRoles.userId, createdIds));
         await db.delete(employees).where(inArray(employees.userId, createdIds));
         await db.delete(users).where(inArray(users.id, createdIds));
       }
+      if (isolationYearId) await db.delete(fiscalYears).where(eq(fiscalYears.id, isolationYearId));
     }
-  });
+  }, 30_000);
 });

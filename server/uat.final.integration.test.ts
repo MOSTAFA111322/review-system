@@ -9,6 +9,7 @@ import {
   employeeStatuses,
   employees,
   fiscalYears,
+  loginActivity,
   notifications,
   operationTypeFields,
   operationTypes,
@@ -41,7 +42,6 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
     expect(db).toBeTruthy();
     expect(owner).toBeTruthy();
     if (!db || !owner) return;
-
     const runId = nanoid(8).toLowerCase().replace(/[^a-z0-9]/g, "x");
     const existingYears = await db.select({ year: fiscalYears.year }).from(fiscalYears);
     const availableYears = Array.from({ length: 100 }, (_, index) => 2100 + index).filter(year => !existingYears.some(item => item.year === year));
@@ -67,7 +67,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       const firstYear = await ownerCaller.fiscalYears.create({ name: `UAT ${yearOne}`, year: yearOne, startDate: `${yearOne}-01-01`, endDate: `${yearOne}-12-31`, makeCurrent: false });
       const secondYear = await ownerCaller.fiscalYears.create({ name: `UAT ${yearTwo}`, year: yearTwo, startDate: `${yearTwo}-01-01`, endDate: `${yearTwo}-12-31`, makeCurrent: false });
       createdYearIds.push(firstYear.id, secondYear.id);
-
+  
       const typeNames = ["قبض", "صرف", "قيد يومية", "مشتريات", "مبيعات", "تكليف", "مرتجع"].map(name => `UAT ${name} ${runId}`);
       for (const [index, name] of typeNames.entries()) {
         const type = await ownerCaller.settings.operationTypes.create({ name, description: "بيانات قبول مؤقتة", color: "#2563eb", sortOrder: 9000 + index });
@@ -88,7 +88,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
 
       await db.insert(users).values(openIds.map((openId, index) => ({ openId, name: `UAT ${["Manager", "Reviewer", "Employee", "Outsider"][index]} ${runId}`, email: `${openId}@example.invalid`, loginMethod: "uat", role: "user", isActive: true })));
       const temporaryUsers = await db.select().from(users).where(inArray(users.openId, openIds));
-      expect(temporaryUsers).toHaveLength(4);
+        expect(temporaryUsers).toHaveLength(4);
       createdUserIds.push(...temporaryUsers.map(user => user.id));
       const [managerRole, reviewerRole, employeeRole] = await Promise.all([
         db.select().from(roles).where(eq(roles.code, "manager")).limit(1),
@@ -125,7 +125,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       const outsider = appRouter.createCaller(contextFor(outsiderUser));
       await expect(manager.reviews.formOptions({ fiscalYearId: secondYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       const options = await manager.reviews.formOptions({ fiscalYearId: firstYear.id });
-      expect(options.operationTypes.some(type => type.id === purchasesTypeId)).toBe(true);
+        expect(options.operationTypes.some(type => type.id === purchasesTypeId)).toBe(true);
       expect(options.employees.some(item => item.id === assignedEmployee.id)).toBe(true);
 
       const field = await ownerCaller.customFields.create({ key: `uat_po_${runId}`, label: "رقم أمر شراء UAT", type: "number", isRequired: true, helpText: "رقم مؤقت", sortOrder: 9000 });
@@ -136,7 +136,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
 
       const createInput = { fiscalYearId: firstYear.id, operationTypeId: purchasesTypeId, reviewerStatusId: reviewerOpen.id, employeeStatusId: employeeOpen.id, assignedEmployeeId: assignedEmployee.id, voucherNumber: null, title: `UAT مشتريات عاجلة ${runId}`, description: "وصف قبول مؤقت", problem: "مشكلة اختبار UAT", requiredAction: "إجراء تصحيحي", priority: "critical" as const, dueDate: `${yearOne}-06-15` };
       const primary = await manager.reviews.create(createInput);
-      createdReviewIds.push(primary.id);
+        createdReviewIds.push(primary.id);
       expect(primary.internalRef).toMatch(new RegExp(`^REV-${yearOne}-\\d{6,}$`));
       for (let index = 0; index < 5; index += 1) {
         const extra = await manager.reviews.create({ ...createInput, title: `UAT سجل ${index} ${runId}`, voucherNumber: `V-${runId}-${index}`, priority: index === 0 ? "urgent" : "normal" });
@@ -202,7 +202,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       const activeAfterCancelledRestore = await manager.reviews.list({ fiscalYearId: firstYear.id, page: 1, pageSize: 15, archiveScope: "active", sortBy: "createdAt", sortDirection: "desc" });
       expect(activeAfterCancelledRestore.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: primary.id, cancelledAt: null, cancellationReason: null })]));
       const activity = await manager.activity.list({ reviewId: primary.id });
-      expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "review.archived", "review.unarchived", "review.cancelled", "review.cancelled.restored", "customFields.updated"]));
+        expect(activity.map(item => item.action)).toEqual(expect.arrayContaining(["review.created", "review.assigned", "comment.created", "review.status.employee.changed", "review.status.reviewer.changed", "review.archived", "review.unarchived", "review.cancelled", "review.cancelled.restored", "customFields.updated"]));
 
       const attachmentFixtures = [
         { fileName: `uat-${runId}.pdf`, mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF\n") },
@@ -214,7 +214,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
         createdAttachmentIds.push(uploaded.id);
       }
       const listedAttachments = await manager.attachments.list({ reviewId: primary.id });
-      expect(listedAttachments).toHaveLength(3);
+        expect(listedAttachments).toHaveLength(3);
       await expect(ownerCaller.attachments.upload({ reviewId: primary.id, fileName: `invalid-${runId}.pdf`, mimeType: "application/pdf", base64: attachmentFixtures[1].bytes.toString("base64") })).rejects.toMatchObject({ code: "BAD_REQUEST" });
       await expect(outsider.attachments.getAccessUrl({ id: createdAttachmentIds[0] })).rejects.toMatchObject({ code: "FORBIDDEN" });
       for (const attachmentId of createdAttachmentIds) {
@@ -228,7 +228,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       expect(await manager.attachments.list({ reviewId: primary.id })).toHaveLength(0);
 
       const overviewBeforeDelete = await manager.analytics.overview({ fiscalYearId: firstYear.id });
-      expect(overviewBeforeDelete.metrics.total).toBe(6);
+        expect(overviewBeforeDelete.metrics.total).toBe(6);
       await manager.reviews.remove({ id: primary.id });
       const overviewAfterDelete = await manager.analytics.overview({ fiscalYearId: firstYear.id });
       expect(overviewAfterDelete.metrics.total).toBe(5);
@@ -245,7 +245,7 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       await expect(manager.reviews.get({ id: primary.id })).resolves.toMatchObject({ id: primary.id, operationTypeId: purchasesTypeId });
       await ownerCaller.settings.operationTypes.setActive({ id: purchasesTypeId, isActive: true });
     } finally {
-      if (createdReviewIds.length) await db.delete(attachments).where(inArray(attachments.reviewId, createdReviewIds));
+        if (createdReviewIds.length) await db.delete(attachments).where(inArray(attachments.reviewId, createdReviewIds));
       if (createdReviewIds.length) await db.delete(reviews).where(inArray(reviews.id, createdReviewIds));
       if (createdFieldIds.length) {
         await db.delete(customFieldValues).where(inArray(customFieldValues.customFieldId, createdFieldIds));
@@ -257,12 +257,15 @@ describeWithLiveData("UAT final — temporary workflow data is completely remove
       if (createdOperationTypeIds.length) await db.delete(operationTypes).where(inArray(operationTypes.id, createdOperationTypeIds));
       if (createdReviewerStatusIds.length) await db.delete(reviewerStatuses).where(inArray(reviewerStatuses.id, createdReviewerStatusIds));
       if (createdEmployeeStatusIds.length) await db.delete(employeeStatuses).where(inArray(employeeStatuses.id, createdEmployeeStatusIds));
-      if (createdYearIds.length) await db.delete(fiscalYears).where(inArray(fiscalYears.id, createdYearIds));
       if (createdUserIds.length) {
         await db.delete(notifications).where(inArray(notifications.userId, createdUserIds));
+        await db.delete(loginActivity).where(inArray(loginActivity.userId, createdUserIds));
+        await db.delete(userFiscalYears).where(inArray(userFiscalYears.userId, createdUserIds));
+        await db.delete(userRoles).where(inArray(userRoles.userId, createdUserIds));
         await db.delete(employees).where(inArray(employees.id, createdEmployeeIds));
         await db.delete(users).where(inArray(users.id, createdUserIds));
       }
-    }
-  }, 30_000);
+      if (createdYearIds.length) await db.delete(fiscalYears).where(inArray(fiscalYears.id, createdYearIds));
+      }
+  }, 90_000);
 });

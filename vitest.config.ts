@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // Live integration tests share a remote database; prevent cross-file connection contention.
+    fileParallelism: false,
+    maxWorkers: 1,
   },
 });

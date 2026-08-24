@@ -1,9 +1,9 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, like, lte } from "drizzle-orm";
 import { z } from "zod";
-import { reviewActivityLog, reviewComments, reviews, users } from "../../drizzle/schema";
+import { employees, reviewActivityLog, reviewComments, reviews, users } from "../../drizzle/schema";
 import { getDb } from "../db";
-import { PERMISSIONS, requireFiscalYearAccess, requirePermission } from "../rbac";
+import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
 import { enforceReviewVisibility } from "./reviews";
 
@@ -69,5 +69,33 @@ export const activityRouter = router({
       actorId: users.id,
       actorName: users.name,
     }).from(reviewActivityLog).leftJoin(users, eq(reviewActivityLog.actorUserId, users.id)).where(eq(reviewActivityLog.reviewId, input.reviewId)).orderBy(asc(reviewActivityLog.createdAt));
+  }),
+  export: protectedProcedure.input(z.object({ startDate: z.coerce.date().optional(), endDate: z.coerce.date().optional(), actorName: z.string().trim().max(180).optional(), action: z.string().trim().max(100).optional() }).refine(input => !input.startDate || !input.endDate || input.startDate <= input.endDate, { message: "يجب أن يسبق تاريخ البداية تاريخ النهاية." })).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REPORTS_EXPORT);
+    const db = await database();
+    const conditions = [] as any[];
+    if (input.startDate) conditions.push(gte(reviewActivityLog.createdAt, input.startDate));
+    if (input.endDate) conditions.push(lte(reviewActivityLog.createdAt, input.endDate));
+    if (input.action) conditions.push(eq(reviewActivityLog.action, input.action));
+    if (input.actorName) conditions.push(like(users.name, `%${input.actorName}%`));
+    const canViewAll = ctx.user.role === "admin" || await userHasPermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ALL);
+    if (!canViewAll) {
+      const [employee] = await db.select({ id: employees.id }).from(employees).where(eq(employees.userId, ctx.user.id)).limit(1);
+      if (!employee) return [];
+      conditions.push(eq(reviews.assignedEmployeeId, employee.id));
+    }
+    return db.select({
+      id: reviewActivityLog.id,
+      reviewId: reviewActivityLog.reviewId,
+      reference: reviews.internalRef,
+      reviewTitle: reviews.title,
+      action: reviewActivityLog.action,
+      field: reviewActivityLog.field,
+      beforeValue: reviewActivityLog.beforeValue,
+      afterValue: reviewActivityLog.afterValue,
+      metadata: reviewActivityLog.metadata,
+      createdAt: reviewActivityLog.createdAt,
+      actorName: users.name,
+    }).from(reviewActivityLog).innerJoin(reviews, eq(reviewActivityLog.reviewId, reviews.id)).leftJoin(users, eq(reviewActivityLog.actorUserId, users.id)).where(conditions.length ? and(...conditions) : undefined).orderBy(asc(reviewActivityLog.createdAt));
   }),
 });

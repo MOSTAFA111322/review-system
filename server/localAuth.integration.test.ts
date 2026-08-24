@@ -43,9 +43,10 @@ describeWithLiveData("المصادقة المحلية — قبول تكاملي 
     expect(owner).toBeTruthy();
     if (!db || !owner) return;
 
-    const [reviewerRole] = await db.select().from(roles).where(eq(roles.code, "reviewer")).limit(1);
-    const [employeeRole] = await db.select().from(roles).where(eq(roles.code, "employee")).limit(1);
-    const [fiscalYear] = await db.select({ id: fiscalYears.id }).from(fiscalYears).limit(1);
+      const [reviewerRole] = await db.select().from(roles).where(eq(roles.code, "reviewer")).limit(1);
+      const [employeeRole] = await db.select().from(roles).where(eq(roles.code, "employee")).limit(1);
+      const [fiscalYear] = await db.select({ id: fiscalYears.id }).from(fiscalYears).limit(1);
+
     expect(reviewerRole).toBeTruthy();
     expect(employeeRole).toBeTruthy();
     expect(fiscalYear).toBeTruthy();
@@ -148,5 +149,5 @@ describeWithLiveData("المصادقة المحلية — قبول تكاملي 
         await db.delete(users).where(eq(users.id, localUserId));
       }
     }
-  });
+  }, 30_000);
 });

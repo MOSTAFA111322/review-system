@@ -85,6 +85,8 @@ describeWithLiveData("custom field API behavior — temporary configuration is r
       if (reviewId) await db.delete(reviews).where(eq(reviews.id, reviewId));
       if (operationTypeId) await db.delete(operationTypes).where(eq(operationTypes.id, operationTypeId));
       if (employeeUserId) {
+        await db.delete(userFiscalYears).where(eq(userFiscalYears.userId, employeeUserId));
+        await db.delete(userRoles).where(eq(userRoles.userId, employeeUserId));
         await db.delete(employees).where(eq(employees.userId, employeeUserId));
         await db.delete(users).where(eq(users.id, employeeUserId));
       }

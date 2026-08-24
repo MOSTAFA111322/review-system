@@ -1,10 +1,8 @@
 import { TRPCError } from "@trpc/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("./db", () => ({ getDb: vi.fn() }));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { User } from "../drizzle/schema";
-import { getDb } from "./db";
+import * as db from "./db";
 import { ensurePlatformAdmin, PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "./rbac";
 
 function userWithRole(role: "admin" | "user", isActive = true): User {
@@ -22,7 +20,14 @@ function limitQuery(rows: unknown[]) {
 }
 
 describe("RBAC platform guard", () => {
-  beforeEach(() => vi.clearAllMocks());
+  let getDbMock: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    getDbMock = vi.spyOn(db, "getDb");
+  });
+  afterEach(() => {
+    getDbMock.mockRestore();
+  });
 
   it("allows the platform administrator to initialize system configuration", () => {
     expect(() => ensurePlatformAdmin(userWithRole("admin"))).not.toThrow();
@@ -39,27 +44,27 @@ describe("RBAC platform guard", () => {
 
   it("uses role-permission assignments for ordinary users and denies missing permissions", async () => {
     const select = vi.fn().mockReturnValueOnce(permissionQuery([{ permission: PERMISSIONS.COMMENTS_CREATE }])).mockReturnValueOnce(permissionQuery([]));
-    vi.mocked(getDb).mockResolvedValue({ select } as never);
+    getDbMock.mockResolvedValue({ select } as never);
     await expect(userHasPermission(userWithRole("user"), PERMISSIONS.COMMENTS_CREATE)).resolves.toBe(true);
     await expect(requirePermission(userWithRole("user"), PERMISSIONS.REPORTS_EXPORT)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("rejects a non-administrator from an administrative backend permission without writing data", async () => {
     const select = vi.fn().mockReturnValue(permissionQuery([]));
-    vi.mocked(getDb).mockResolvedValue({ select } as never);
+    getDbMock.mockResolvedValue({ select } as never);
     await expect(requirePermission(userWithRole("user"), PERMISSIONS.USERS_MANAGE)).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect(select).toHaveBeenCalledTimes(1);
   });
 
   it("blocks all write access to a closed fiscal year, including for the platform administrator", async () => {
     const select = vi.fn().mockReturnValue(limitQuery([{ id: 44, status: "closed" }]));
-    vi.mocked(getDb).mockResolvedValue({ select } as never);
+    getDbMock.mockResolvedValue({ select } as never);
     await expect(requireFiscalYearAccess(userWithRole("admin"), 44, true)).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("blocks an ordinary account from a year outside its assigned scope", async () => {
     const select = vi.fn().mockReturnValueOnce(limitQuery([{ id: 44, status: "open" }])).mockReturnValueOnce(limitQuery([]));
-    vi.mocked(getDb).mockResolvedValue({ select } as never);
+    getDbMock.mockResolvedValue({ select } as never);
     await expect(requireFiscalYearAccess(userWithRole("user"), 44, false)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 

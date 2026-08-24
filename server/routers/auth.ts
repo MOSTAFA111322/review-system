@@ -75,11 +75,23 @@ export const authRouter = router({
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "قاعدة البيانات غير متاحة حاليًا." });
     return db.select({ id: loginActivity.id, event: loginActivity.event, ipAddress: loginActivity.ipAddress, userAgent: loginActivity.userAgent, createdAt: loginActivity.createdAt, userId: users.id, userName: users.name, email: users.email }).from(loginActivity).innerJoin(users, eq(loginActivity.userId, users.id)).orderBy(desc(loginActivity.createdAt)).limit(input?.limit ?? 50);
   }),
-  logout: publicProcedure.mutation(({ ctx }) => {
+  logout: publicProcedure.mutation(async ({ ctx }) => {
     if (ctx.user) {
       const rawIp = ctx.req.headers["x-forwarded-for"];
       const rawAgent = ctx.req.headers["user-agent"];
-      void getDb().then(db => db?.insert(loginActivity).values({ userId: ctx.user!.id, event: "logout", ipAddress: Array.isArray(rawIp) ? rawIp[0] : rawIp?.split(",")[0]?.trim() ?? null, userAgent: Array.isArray(rawAgent) ? rawAgent[0] : rawAgent ?? null })).catch(error => console.warn("[Audit] تعذر تسجيل حدث الخروج:", error));
+      try {
+        const db = await getDb();
+        if (db) {
+          await db.insert(loginActivity).values({
+            userId: ctx.user.id,
+            event: "logout",
+            ipAddress: Array.isArray(rawIp) ? rawIp[0] : rawIp?.split(",")[0]?.trim() ?? null,
+            userAgent: Array.isArray(rawAgent) ? rawAgent[0] : rawAgent ?? null,
+          });
+        }
+      } catch (error) {
+        console.warn("[Audit] تعذر تسجيل حدث الخروج:", error);
+      }
     }
     const cookieOptions = getSessionCookieOptions(ctx.req);
     ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

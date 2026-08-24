@@ -60,3 +60,31 @@ describe("عزل إعدادات التقارير عن الطباعة", () => {
     expect(stylesSource).toContain(".reports-print-root .print-active button");
   });
 });
+
+
+describe("تصدير سجل التدقيق الإداري", () => {
+  it("يعرض بطاقة تصدير آمنة مع فلاتر الفترة والمنفذ والإجراء", () => {
+    expect(reportsSource).toContain("trpc.activity.export.useQuery");
+    expect(reportsSource).toContain("سجل التدقيق الإداري");
+    expect(reportsSource).toContain("بداية سجل التدقيق");
+    expect(reportsSource).toContain("اسم منفذ الحدث");
+    expect(reportsSource).toContain("نوع الإجراء");
+    expect(reportsSource).toContain("لا يتضمن كلمات المرور أو رموز الجلسات");
+  });
+
+  it("تربط أزرار CSV وExcel بنتائج الخادم فقط", () => {
+    expect(reportsSource).toContain("audit.refetch()");
+    expect(reportsSource).toContain("سجل-التدقيق.csv");
+    expect(reportsSource).toContain("سجل-التدقيق.xls");
+    expect(reportsSource).toContain('exportAudit("xls")');
+    expect(reportsSource).toContain('exportAudit("csv")');
+  });
+
+  it("تفرض طبقة الخادم صلاحية التصدير وتضيّق النطاق لغير أصحاب الرؤية الشاملة", () => {
+    const collaborationSource = readFileSync(path.resolve(process.cwd(), "server/routers/collaboration.ts"), "utf8");
+    expect(collaborationSource).toContain("PERMISSIONS.REPORTS_EXPORT");
+    expect(collaborationSource).toContain("userHasPermission(ctx.user, PERMISSIONS.REVIEWS_VIEW_ALL)");
+    expect(collaborationSource).toContain("reviews.assignedEmployeeId");
+    expect(collaborationSource).toContain("like(users.name");
+  });
+});

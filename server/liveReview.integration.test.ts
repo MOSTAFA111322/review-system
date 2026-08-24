@@ -76,5 +76,5 @@ describeWithLiveData("live review API acceptance — read-only", () => {
         toStatusId: 2_147_483_647,
       })
     ).rejects.toMatchObject({ code: "CONFLICT" });
-  });
+  }, 30_000);
 });
