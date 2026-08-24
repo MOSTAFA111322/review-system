@@ -47,6 +47,10 @@ describe("غلاف صفحة إدارة المستخدمين", () => {
     expect(usersPage).toContain("setRoles");
     expect(usersPage).toContain("setFiscalYears");
     expect(usersPage).toContain('aria-label="البحث عن مستخدم"');
+    expect(usersPage).toContain('aria-label="تصفية مصدر الحساب"');
+    expect(usersPage).toContain('aria-label="تصفية حالة الحساب"');
+    expect(usersPage).toContain('loginMethod: sourceFilter');
+    expect(usersPage).toContain('status: statusFilter');
     expect(usersPage).toContain("تعطيل");
     expect(usersPage).toContain("تعديل الدخول");
   });

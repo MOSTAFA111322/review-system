@@ -35,10 +35,13 @@ export const setupRouter = router({
 });
 
 export const usersRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
+  list: protectedProcedure.input(z.object({ loginMethod: z.enum(["all", "local", "google"]).default("all"), status: z.enum(["all", "active", "inactive"]).default("all") }).optional().default({ loginMethod: "all", status: "all" })).query(async ({ ctx, input }) => {
     await requirePermission(ctx.user, PERMISSIONS.USERS_MANAGE);
     const db = await database();
-    const records = await db.select({ id: users.id, name: users.name, email: users.email, username: users.username, loginMethod: users.loginMethod, hasLocalPassword: sql<boolean>`${users.passwordHash} IS NOT NULL`, isActive: users.isActive, lastSignedIn: users.lastSignedIn, platformRole: users.role }).from(users);
+    const filters = [];
+    if (input.loginMethod !== "all") filters.push(eq(users.loginMethod, input.loginMethod));
+    if (input.status !== "all") filters.push(eq(users.isActive, input.status === "active"));
+    const records = await db.select({ id: users.id, name: users.name, email: users.email, username: users.username, loginMethod: users.loginMethod, hasLocalPassword: sql<boolean>`${users.passwordHash} IS NOT NULL`, isActive: users.isActive, lastSignedIn: users.lastSignedIn, platformRole: users.role }).from(users).where(filters.length ? and(...filters) : undefined);
     const [assignedRoles, assignedFiscalYears] = await Promise.all([
       db.select({ userId: userRoles.userId, roleId: userRoles.roleId, roleName: roles.name, roleCode: roles.code }).from(userRoles).innerJoin(roles, eq(userRoles.roleId, roles.id)),
       db.select({ userId: userFiscalYears.userId, fiscalYearId: userFiscalYears.fiscalYearId }).from(userFiscalYears),
