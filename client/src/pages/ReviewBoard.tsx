@@ -49,8 +49,9 @@ export default function ReviewBoard({ fiscalYearId, fiscalYearName, isClosed }: 
     archiveScope,
     sortBy, sortDirection: "desc" as const,
   }), [fiscalYearId, page, query, priority, reviewerStatusId, employeeStatusId, operationTypeId, attention, archiveScope, sortBy]);
-  const list = trpc.reviews.list.useQuery(filters);
-  const options = trpc.reviews.filterOptions.useQuery({ fiscalYearId });
+  const hasFiscalYear = Number.isFinite(fiscalYearId) && fiscalYearId > 0;
+  const list = trpc.reviews.list.useQuery(filters, { enabled: hasFiscalYear });
+  const options = trpc.reviews.filterOptions.useQuery({ fiscalYearId }, { enabled: hasFiscalYear });
   const resetFilters = () => { setPage(1); setQuery(""); setPriority("all"); setReviewerStatusId("all"); setEmployeeStatusId("all"); setOperationTypeId("all"); setAttention("all"); setSortBy("createdAt"); };
 
   return (
