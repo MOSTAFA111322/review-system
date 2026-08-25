@@ -77,12 +77,13 @@ export type DailyDelayAlert = {
   description: string;
 };
 
-export function getDailyDelayAlert(overdue: number, unupdated: number): DailyDelayAlert {
-  if (overdue >= OVERDUE_TASK_ESCALATION_THRESHOLD) {
+export function getDailyDelayAlert(overdue: number, unupdated: number, configuredThreshold = OVERDUE_TASK_ESCALATION_THRESHOLD): DailyDelayAlert {
+  const threshold = Number.isFinite(configuredThreshold) && configuredThreshold >= 1 ? Math.floor(configuredThreshold) : OVERDUE_TASK_ESCALATION_THRESHOLD;
+  if (overdue >= threshold) {
     return {
       tone: "escalate",
       title: "تجاوز حد التأخير التشغيلي",
-      description: `${overdue} مهام متأخرة تجاوزت عتبة التصعيد (${OVERDUE_TASK_ESCALATION_THRESHOLD} مهام).`,
+      description: `${overdue} مهام متأخرة تجاوزت عتبة التصعيد (${threshold} مهام).`,
     };
   }
   if (overdue > 0 || unupdated > 0) {

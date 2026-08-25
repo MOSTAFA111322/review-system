@@ -7,6 +7,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardList, Clock3, FileSpreadsheet, FileText, Loader2, Percent, Printer } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Fragment, useEffect, useState } from "react";
+import { useLocation } from "wouter";
 
 function formatDate(value: Date | string | null) {
   if (!value) return "غير محدد";
@@ -18,6 +19,8 @@ const priorityLabels = { normal: "عادية", urgent: "مستعجلة", critica
 
 export default function DailyTasks() {
   const { user } = useAuth();
+  const [location] = useLocation();
+  const showOverdueOnly = new URLSearchParams(location.split("?")[1] ?? "").get("view") === "overdue";
   const canManageTasks = Boolean(user?.permissions?.includes("*") || user?.permissions?.includes("dailyTasks.manage"));
   const years = trpc.fiscalYears.list.useQuery();
   const [fiscalYearId, setFiscalYearId] = useState<number | null>(null);
@@ -49,13 +52,22 @@ export default function DailyTasks() {
   const lastSevenDays = new Date(`${today}T00:00:00.000Z`);
   lastSevenDays.setUTCDate(lastSevenDays.getUTCDate() - 6);
   const lastSevenDaysText = lastSevenDays.toISOString().slice(0, 10);
+  useEffect(() => {
+    if (!showOverdueOnly || !fiscalYearId || !years.data?.length) return;
+    const activeYear = years.data.find(year => year.id === fiscalYearId);
+    const startDate = activeYear?.startDate ? new Date(activeYear.startDate).toISOString().slice(0, 10) : lastSevenDaysText;
+    setDateMode("custom");
+    setCustomStartDate(startDate);
+    setCustomEndDate(yesterdayText);
+    setStatusFilter(undefined);
+  }, [fiscalYearId, lastSevenDaysText, showOverdueOnly, years.data, yesterdayText]);
   const activeStartDate = dateMode === "today" ? today : dateMode === "week" ? lastSevenDaysText : customStartDate;
   const activeEndDate = dateMode === "today" ? today : dateMode === "week" ? today : customEndDate;
   const tasks = trpc.dailyTasks.list.useQuery({ fiscalYearId: fiscalYearId ?? 0, startDate: activeStartDate, endDate: activeEndDate, status: statusFilter }, { enabled: Boolean(fiscalYearId) });
   const indicators = trpc.dailyTasks.operationalIndicators.useQuery({ fiscalYearId: fiscalYearId ?? 0, startDate: activeStartDate, endDate: activeEndDate }, { enabled: Boolean(fiscalYearId) });
   const overdueTasks = trpc.dailyTasks.list.useQuery({ fiscalYearId: fiscalYearId ?? 0, endDate: yesterdayText }, { enabled: Boolean(fiscalYearId) });
   const report = trpc.dailyTasks.unifiedReport.useQuery({ fiscalYearId: fiscalYearId ?? 0, employeeId: reportEmployeeId, startDate: activeStartDate, endDate: activeEndDate }, { enabled: Boolean(fiscalYearId && reportOpen) });
-  const displayTasks = [...(tasks.data ?? [])].sort((a, b) => {
+  const displayTasks = [...(showOverdueOnly ? overdueTasks.data ?? [] : tasks.data ?? [])].filter(task => !showOverdueOnly || (new Date(task.taskDate).toISOString().slice(0, 10) < today && task.status !== "completed" && task.status !== "skipped")).sort((a, b) => {
     if (a.templateId && b.templateId && a.templateId !== b.templateId) return a.templateId - b.templateId;
     if (a.templateId && !b.templateId) return -1;
     if (!a.templateId && b.templateId) return 1;

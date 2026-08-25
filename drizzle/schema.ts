@@ -582,6 +582,14 @@ export const userPreferences = mysqlTable("user_preferences", {
   ...auditTimestamps,
 });
 
+/** إعداد موحد لعتبة تصعيد التأخر في لوحة القيادة؛ تعديله مقيد بصلاحية الإعدادات. */
+export const dashboardAlertSettings = mysqlTable("dashboard_alert_settings", {
+  id: int("id").primaryKey(),
+  overdueThreshold: int("overdueThreshold").default(3).notNull(),
+  updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+  ...auditTimestamps,
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type FiscalYear = typeof fiscalYears.$inferSelect;

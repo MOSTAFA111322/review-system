@@ -54,11 +54,13 @@ function DecisionCard({ title, value, description, icon: Icon, tone, onClick }: 
   return <button type="button" onClick={onClick} className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-right shadow-sm transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-slate-800 dark:bg-slate-900"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${styles[tone]}`}><Icon className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="flex items-baseline justify-between gap-3"><span className="font-semibold">{title}</span><strong className="text-2xl">{formatNumber(value)}</strong></span><span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">{description}</span></span><ArrowLeft className="mt-1 h-4 w-4 shrink-0 text-slate-400" /></button>;
 }
 
-function DelayAlert({ data, onOpen }: { data: OperationalIndicators; onOpen: () => void }) {
-  const alert = getDailyDelayAlert(data.overdue, data.unupdated);
+function DelayAlert({ data, onOpen: _onOpen }: { data: OperationalIndicators; onOpen: () => void }) {
+  const alertSettings = trpc.settings.dashboardAlerts.get.useQuery();
+  const [, setLocation] = useLocation();
+  const alert = getDailyDelayAlert(data.overdue, data.unupdated, alertSettings.data?.overdueThreshold);
   if (alert.tone === "clear") return null;
   const escalating = alert.tone === "escalate";
-  return <section role="alert" aria-live="polite" className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${escalating ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/80 dark:bg-red-950/50 dark:text-red-100" : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/80 dark:bg-amber-950/45 dark:text-amber-100"}`}><div className="flex items-start gap-3"><span className={`rounded-xl p-2.5 ${escalating ? "bg-red-600 text-white" : "bg-amber-500 text-white"}`}><AlertTriangle className="h-5 w-5" /></span><div><p className="font-bold">{alert.title}</p><p className="mt-1 text-sm leading-6 opacity-85">{alert.description} راجع قائمة المهام ودوّن سبب التأخير أو حدّث الحالة.</p></div></div><button type="button" onClick={onOpen} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${escalating ? "bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-600 dark:bg-red-500 dark:hover:bg-red-400" : "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500 dark:bg-amber-500 dark:hover:bg-amber-400"}`}>فتح المهام المتأخرة</button></section>;
+  return <section role="alert" aria-live="polite" className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${escalating ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/80 dark:bg-red-950/50 dark:text-red-100" : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/80 dark:bg-amber-950/45 dark:text-amber-100"}`}><div className="flex items-start gap-3"><span className={`rounded-xl p-2.5 ${escalating ? "bg-red-600 text-white" : "bg-amber-500 text-white"}`}><AlertTriangle className="h-5 w-5" /></span><div><p className="font-bold">{alert.title}</p><p className="mt-1 text-sm leading-6 opacity-85">{alert.description} راجع قائمة المهام ودوّن سبب التأخير أو حدّث الحالة.</p></div></div><button type="button" onClick={() => setLocation("/daily-tasks?view=overdue")} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${escalating ? "bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-600 dark:bg-red-500 dark:hover:bg-red-400" : "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500 dark:bg-amber-500 dark:hover:bg-amber-400"}`}>فتح المهام المتأخرة</button></section>;
 }
 
 function OperationalHealth({ data, manager }: { data: OperationalIndicators; manager: boolean }) {
@@ -99,8 +101,22 @@ export default function Dashboard() {
   const canManageUsers = hasPermission("users.manage");
   const canViewAllReviews = hasPermission("reviews.view.all");
   const isManagerView = canManageDailyTasks || canManageUsers || canViewAllReviews;
+  const dashboardPreferences = trpc.dashboardPreferences.get.useQuery(undefined, { enabled: Boolean(user) });
+  const saveDashboardPreferences = trpc.dashboardPreferences.save.useMutation();
+  const [periodPreferenceLoaded, setPeriodPreferenceLoaded] = useState(false);
 
   useEffect(() => { if (!fiscalYearId && years.data?.length) setFiscalYearId(years.data.find(year => year.isCurrent)?.id ?? years.data[0].id); }, [fiscalYearId, years.data]);
+  useEffect(() => {
+    if (periodPreferenceLoaded || !dashboardPreferences.data) return;
+    setPeriodPreset(dashboardPreferences.data.preset);
+    setCustomStartDate(dashboardPreferences.data.customStartDate ?? "");
+    setCustomEndDate(dashboardPreferences.data.customEndDate ?? "");
+    setPeriodPreferenceLoaded(true);
+  }, [dashboardPreferences.data, periodPreferenceLoaded]);
+  useEffect(() => {
+    if (!periodPreferenceLoaded || (periodPreset === "custom" && (!customStartDate || !customEndDate))) return;
+    saveDashboardPreferences.mutate({ preset: periodPreset, ...(periodPreset === "custom" ? { customStartDate, customEndDate } : {}) });
+  }, [customEndDate, customStartDate, periodPreferenceLoaded, periodPreset]);
   const activeYear = years.data?.find(year => year.id === fiscalYearId);
   const dateRange = useMemo(() => resolveDashboardDateRange({ preset: periodPreset, customStartDate, customEndDate, fiscalStartDate: activeYear?.startDate, fiscalEndDate: activeYear?.endDate }), [activeYear?.endDate, activeYear?.startDate, customEndDate, customStartDate, periodPreset]);
   const periodReady = Boolean(fiscalYearId && dateRange.isValid && dateRange.startDate && dateRange.endDate);

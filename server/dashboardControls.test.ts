@@ -22,5 +22,7 @@ describe("dashboard controls", () => {
     expect(sortTeamProductivityRows(members, "attentionItems", "desc")[0].employeeName).toBe("مصطفى");
     expect(getDailyDelayAlert(3, 0).tone).toBe("escalate");
     expect(getDailyDelayAlert(1, 2).tone).toBe("monitor");
+    expect(getDailyDelayAlert(2, 0, 2).tone).toBe("escalate");
+    expect(getDailyDelayAlert(2, 0, 3).tone).toBe("monitor");
   });
 });

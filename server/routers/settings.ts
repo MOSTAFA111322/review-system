@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { employeeStatuses, operationTypes, permissions, reviewerStatuses, statusTransitions } from "../../drizzle/schema";
+import { dashboardAlertSettings, employeeStatuses, operationTypes, permissions, reviewerStatuses, statusTransitions } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requirePermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -149,9 +149,26 @@ const transitionsRouter = router({
   }),
 });
 
+const dashboardAlertsRouter = router({
+  get: protectedProcedure.query(async () => {
+    const db = await database();
+    const [settings] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    return { overdueThreshold: settings?.overdueThreshold ?? 3 };
+  }),
+  update: protectedProcedure.input(z.object({ overdueThreshold: z.number().int().min(1).max(1000) })).mutation(async ({ ctx, input }) => {
+    await requireSettingsPermission(ctx.user);
+    const db = await database();
+    const [current] = await db.select({ id: dashboardAlertSettings.id }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    if (current) await db.update(dashboardAlertSettings).set({ overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id }).where(eq(dashboardAlertSettings.id, 1));
+    else await db.insert(dashboardAlertSettings).values({ id: 1, overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id });
+    return { success: true };
+  }),
+});
+
 export const settingsRouter = router({
   operationTypes: operationTypesRouter,
   reviewerStatuses: reviewerStatusesRouter,
   employeeStatuses: employeeStatusesRouter,
   transitions: transitionsRouter,
+  dashboardAlerts: dashboardAlertsRouter,
 });
