@@ -2,12 +2,81 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
+import { jsPDF } from "jspdf";
 import { AlertTriangle, Download, FileSpreadsheet, FileText, ShieldCheck, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const download = (content: string, name: string, type: string) => { const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type })); link.download = name; link.click(); URL.revokeObjectURL(link.href); };
 const escapeXml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
+function downloadMonthlyPdf(data: { weekStart: string; weekEnd: string; summary: { total: number; completed: number; overdue: number; teamsAtRisk: number } }, rows: string[][]) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const canvasWidth = 1680;
+  const canvasHeight = 1190;
+  const margin = 64;
+  const tableTop = 282;
+  const rowHeight = 44;
+  const header = rows[0] ?? [];
+  const bodyRows = rows.slice(1);
+  const pageCapacity = Math.max(1, Math.floor((canvasHeight - tableTop - 70) / rowHeight) - 1);
+  const pages = Array.from({ length: Math.max(1, Math.ceil(bodyRows.length / pageCapacity)) }, (_, index) => bodyRows.slice(index * pageCapacity, (index + 1) * pageCapacity));
+
+  pages.forEach((pageRows, pageIndex) => {
+    if (pageIndex) doc.addPage();
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("تعذر تجهيز صفحة PDF.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvasWidth, canvasHeight);
+    context.direction = "rtl";
+    context.textAlign = "right";
+    context.fillStyle = "#0f172a";
+    context.font = "700 38px Arial";
+    context.fillText("تقرير التزام الفرق الشهري", canvasWidth - margin, 78);
+    context.fillStyle = "#475569";
+    context.font = "400 20px Arial";
+    context.fillText(`النطاق: ${data.weekStart} إلى ${data.weekEnd}`, canvasWidth - margin, 116);
+    context.fillText("يُنشأ من بيانات المهام اليومية المتاحة وفق الصلاحيات والسنة المالية.", canvasWidth - margin, 148);
+
+    const summaries = [["إجمالي المهام", String(data.summary.total), "#eff6ff", "#1d4ed8"], ["المكتملة", String(data.summary.completed), "#ecfdf5", "#047857"], ["المتأخرة", String(data.summary.overdue), "#fef2f2", "#b91c1c"], ["فرق تجاوزت العتبة", String(data.summary.teamsAtRisk), "#fff7ed", "#c2410c"]] as const;
+    const summaryWidth = (canvasWidth - margin * 2 - 36) / summaries.length;
+    summaries.forEach(([label, value, background, color], index) => {
+      const x = canvasWidth - margin - (index + 1) * summaryWidth - index * 12;
+      context.fillStyle = background;
+      context.fillRect(x, 178, summaryWidth, 74);
+      context.fillStyle = "#475569";
+      context.font = "600 17px Arial";
+      context.fillText(label, x + summaryWidth - 16, 205);
+      context.fillStyle = color;
+      context.font = "700 28px Arial";
+      context.fillText(value, x + summaryWidth - 16, 238);
+    });
+
+    const columnWidth = (canvasWidth - margin * 2) / Math.max(header.length, 1);
+    const drawRow = (values: string[], y: number, isHeader: boolean) => {
+      values.forEach((value, index) => {
+        const x = margin + index * columnWidth;
+        context.fillStyle = isHeader ? "#1d4ed8" : index % 2 ? "#f8fafc" : "#ffffff";
+        context.fillRect(x, y, columnWidth, rowHeight);
+        context.strokeStyle = "#cbd5e1";
+        context.strokeRect(x, y, columnWidth, rowHeight);
+        context.fillStyle = isHeader ? "#ffffff" : "#1e293b";
+        context.font = isHeader ? "700 15px Arial" : "400 15px Arial";
+        context.fillText(value, x + columnWidth - 10, y + 28, columnWidth - 20);
+      });
+    };
+    drawRow(header, tableTop, true);
+    pageRows.forEach((row, rowIndex) => drawRow(row, tableTop + rowHeight * (rowIndex + 1), false));
+    context.fillStyle = "#64748b";
+    context.font = "400 16px Arial";
+    context.fillText(`صفحة ${pageIndex + 1} من ${pages.length}`, canvasWidth - margin, canvasHeight - 36);
+    doc.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 297, 210, undefined, "FAST");
+  });
+  doc.save(`التزام-الفرق-month-${data.weekStart}.pdf`);
+}
 
 export default function WeeklyTeamCompliance() {
   const years = trpc.fiscalYears.list.useQuery();
@@ -20,8 +89,9 @@ export default function WeeklyTeamCompliance() {
   const input = useMemo(() => ({ fiscalYearId: fiscalYearId ?? 0, period, ...(weekStart ? { weekStart } : {}) }), [fiscalYearId, period, weekStart]);
   const report = trpc.dailyTasks.weeklyTeamCompliance.useQuery(input, { enabled: Boolean(fiscalYearId) });
   const exported = trpc.dailyTasks.weeklyTeamComplianceExport.useQuery(input, { enabled: false });
-  const exportReport = async (kind: "csv" | "xls") => {
+  const exportReport = async (kind: "csv" | "xls" | "pdf") => {
     try {
+      if (kind === "pdf" && period !== "month") return toast.info("يتوفر تصدير PDF لتقرير الالتزام الشهري فقط.");
       const result = await exported.refetch();
       if (!result.data) return toast.error("تعذر تجهيز ملف التقرير. تحقق من صلاحية التصدير.");
       const data = result.data;
@@ -29,11 +99,12 @@ export default function WeeklyTeamCompliance() {
       const comparisonByTeam = new Map(data.comparison.map(item => [item.teamName, item]));
       const rows = [["الفريق", "إجمالي المهام", "المكتملة", "نسبة الإنجاز الحالية", "نسبة الإنجاز السابقة", "فرق الإنجاز", "المتأخرة الحالية", "المتأخرة السابقة", "فرق التأخر", "غير المحدثة", "عتبة التأخر", "تجاوز العتبة"], ...data.teams.map(team => { const comparison = comparisonByTeam.get(team.teamName); return [team.teamName, String(team.total), String(team.completed), `${team.completionRate}%`, `${comparison?.previousCompletionRate ?? 0}%`, `${comparison?.completionRateDelta ?? 0}%`, String(team.overdue), String(comparison?.previousOverdue ?? 0), String(comparison?.overdueDelta ?? 0), String(team.unupdated), String(team.threshold), team.exceedsThreshold ? "نعم" : "لا"]; })];
       if (kind === "csv") { const csv = rows.map(row => row.map(value => `"${value.replaceAll('"', '""')}"`).join(",")).join("\n"); download(`\uFEFF${csv}`, `التزام-الفرق-${period}-${data.weekStart}.csv`, "text/csv;charset=utf-8"); }
+      else if (kind === "pdf") downloadMonthlyPdf(data, rows);
       else { const cells = (row: string[]) => row.map(value => `<Cell><Data ss:Type="String">${escapeXml(value)}</Data></Cell>`).join(""); const xml = `<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="التزام الفرق"><Table>${rows.map(row => `<Row>${cells(row)}</Row>`).join("")}</Table></Worksheet></Workbook>`; download(xml, `التزام-الفرق-${period}-${data.weekStart}.xls`, "application/vnd.ms-excel"); }
-      toast.success(`تم تصدير تقرير الالتزام ${periodLabel} بصيغة ${kind === "csv" ? "CSV" : "Excel"}.`);
+      toast.success(`تم تصدير تقرير الالتزام ${periodLabel} بصيغة ${kind === "csv" ? "CSV" : kind === "pdf" ? "PDF" : "Excel"}.`);
     } catch { toast.error(`تعذر تصدير التقرير ${periodLabel}.`); }
   };
-  return <DashboardLayout><section dir="rtl" className="weekly-compliance-print mx-auto max-w-7xl space-y-6"><div className="print-exclude flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold text-blue-700">تقرير إداري</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">تقرير التزام الفرق {periodLabel}</h1><p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">يجمع الأداء الفعلي للمهام اليومية حسب قسم الموظف ضمن السنة المالية وصلاحياتك، ولا يعرض أسماء الموظفين أو بيانات خارج النطاق.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => window.print()}><FileText className="h-4 w-4" />طباعة</Button><Button variant="outline" disabled={exported.isFetching || !report.data?.teams.length} onClick={() => exportReport("csv")}><Download className="h-4 w-4" />CSV</Button><Button className="bg-emerald-700 hover:bg-emerald-800" disabled={exported.isFetching || !report.data?.teams.length} onClick={() => exportReport("xls")}><FileSpreadsheet className="h-4 w-4" />Excel</Button></div></div><Card className="print-exclude rounded-2xl border-blue-100 bg-blue-50/40 dark:border-blue-900/40 dark:bg-blue-950/20"><CardContent className="grid gap-3 p-5 md:grid-cols-4"><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">السنة المالية</span><select aria-label="السنة المالية للتقرير" value={fiscalYearId ?? ""} onChange={event => setFiscalYearId(Number(event.target.value))} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50"><option value="" disabled>اختر السنة</option>{years.data?.map(year => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">فترة المقارنة</span><select aria-label="فترة مقارنة الالتزام" value={period} onChange={event => { setPeriod(event.target.value as "week" | "month"); setWeekStart(""); }} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50"><option value="week">أسبوعي — 7 أيام</option><option value="month">شهري — 30 يومًا</option></select></label><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">بداية الفترة</span><input aria-label="بداية فترة التقرير" type="date" value={weekStart} onChange={event => setWeekStart(event.target.value)} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50" /><span className="text-xs text-slate-500">فارغ = آخر {periodDaysLabel} منقضية ضمن السنة.</span></label><div className="flex items-end"><Button variant="outline" className="w-full" onClick={() => setWeekStart("")}>إعادة آخر {period === "month" ? "30 يومًا" : "7 أيام"}</Button></div></CardContent></Card>{report.isLoading ? <Card className="rounded-2xl"><CardContent className="p-10 text-center text-sm text-slate-500">جارٍ إعداد تقرير التزام الفرق…</CardContent></Card> : report.isError ? <Card className="rounded-2xl border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30"><CardContent className="p-8 text-center"><AlertTriangle className="mx-auto h-7 w-7 text-red-600" /><p className="mt-3 font-semibold text-red-900 dark:text-red-100">لا يتوفر هذا التقرير لحسابك.</p><p className="mt-1 text-sm text-red-700 dark:text-red-200">يتطلب التقرير صلاحية عرض التقارير وإدارة المهام اليومية والوصول إلى السنة المحددة.</p></CardContent></Card> : report.data ? <><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"><Metric label="إجمالي المهام" value={report.data.summary.total} /><Metric label="المكتملة" value={report.data.summary.completed} tone="green" /><Metric label="المتأخرة" value={report.data.summary.overdue} tone="red" /><Metric label="غير المحدثة" value={report.data.summary.unupdated} tone="amber" /><Metric label="فرق تجاوزت العتبة" value={report.data.summary.teamsAtRisk} tone="red" /></div><ComplianceComparisonChart comparison={report.data.comparison} previousWeekStart={report.data.previousWeekStart} previousWeekEnd={report.data.previousWeekEnd} period={period} /><Card className="overflow-hidden rounded-2xl"><CardHeader><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2 text-base"><UsersRound className="h-4 w-4 text-blue-700" />التفاصيل حسب فريق العمل</CardTitle><CardDescription>النطاق من {report.data.weekStart} إلى {report.data.weekEnd}؛ الترتيب يبدأ بالفرق المتجاوزة للعتبة.</CardDescription></div><span className="flex items-center gap-1 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" />يطبق عزل السنة والصلاحيات في الخادم</span></div></CardHeader><CardContent className="overflow-x-auto p-0">{report.data.teams.length ? <table className="w-full min-w-[860px] text-right text-sm"><thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-900"><tr><th className="px-5 py-3">الفريق</th><th className="px-4 py-3">الإجمالي</th><th className="px-4 py-3">المكتملة</th><th className="px-4 py-3">نسبة الإنجاز</th><th className="px-4 py-3">المتأخرة</th><th className="px-4 py-3">غير المحدثة</th><th className="px-4 py-3">العتبة</th><th className="px-4 py-3">الحالة</th></tr></thead><tbody>{report.data.teams.map(team => <tr key={team.teamName} className="border-t border-slate-100 dark:border-slate-800"><td className="px-5 py-4 font-semibold text-slate-800 dark:text-slate-100">{team.teamName}</td><td className="px-4 py-4">{team.total}</td><td className="px-4 py-4 text-emerald-700 dark:text-emerald-300">{team.completed}</td><td className="px-4 py-4 font-semibold">{team.completionRate}%</td><td className="px-4 py-4 text-red-700 dark:text-red-300">{team.overdue}</td><td className="px-4 py-4 text-amber-700 dark:text-amber-300">{team.unupdated}</td><td className="px-4 py-4">{team.threshold}</td><td className="px-4 py-4">{team.exceedsThreshold ? <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800 dark:bg-red-950/50 dark:text-red-200">تجاوز العتبة</span> : <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">ضمن العتبة</span>}</td></tr>)}</tbody></table> : <div className="p-10 text-center text-sm text-slate-500">لا توجد مهام يومية ضمن النطاق {periodLabel} المحدد.</div>}</CardContent></Card></> : null}</section></DashboardLayout>;
+  return <DashboardLayout><section dir="rtl" className="weekly-compliance-print mx-auto max-w-7xl space-y-6"><div className="print-exclude flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold text-blue-700">تقرير إداري</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">تقرير التزام الفرق {periodLabel}</h1><p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">يجمع الأداء الفعلي للمهام اليومية حسب قسم الموظف ضمن السنة المالية وصلاحياتك، ولا يعرض أسماء الموظفين أو بيانات خارج النطاق.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => window.print()}><FileText className="h-4 w-4" />طباعة</Button><Button variant="outline" disabled={exported.isFetching || !report.data?.teams.length} onClick={() => exportReport("csv")}><Download className="h-4 w-4" />{period === "month" ? "CSV شهري" : "CSV"}</Button>{period === "month" ? <Button variant="outline" disabled={exported.isFetching || !report.data?.teams.length} onClick={() => exportReport("pdf")}><FileText className="h-4 w-4" />PDF شهري</Button> : null}<Button className="bg-emerald-700 hover:bg-emerald-800" disabled={exported.isFetching || !report.data?.teams.length} onClick={() => exportReport("xls")}><FileSpreadsheet className="h-4 w-4" />Excel</Button></div></div><Card className="print-exclude rounded-2xl border-blue-100 bg-blue-50/40 dark:border-blue-900/40 dark:bg-blue-950/20"><CardContent className="grid gap-3 p-5 md:grid-cols-4"><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">السنة المالية</span><select aria-label="السنة المالية للتقرير" value={fiscalYearId ?? ""} onChange={event => setFiscalYearId(Number(event.target.value))} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50"><option value="" disabled>اختر السنة</option>{years.data?.map(year => <option key={year.id} value={year.id}>{year.name}</option>)}</select></label><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">فترة المقارنة</span><select aria-label="فترة مقارنة الالتزام" value={period} onChange={event => { setPeriod(event.target.value as "week" | "month"); setWeekStart(""); }} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50"><option value="week">أسبوعي — 7 أيام</option><option value="month">شهري — 30 يومًا</option></select></label><label className="space-y-1"><span className="block text-xs font-semibold text-slate-600 dark:text-slate-300">بداية الفترة</span><input aria-label="بداية فترة التقرير" type="date" value={weekStart} onChange={event => setWeekStart(event.target.value)} className="h-10 w-full rounded-xl border border-blue-200 bg-background px-3 text-sm dark:border-blue-900/50" /><span className="text-xs text-slate-500">فارغ = آخر {periodDaysLabel} منقضية ضمن السنة.</span></label><div className="flex items-end"><Button variant="outline" className="w-full" onClick={() => setWeekStart("")}>إعادة آخر {period === "month" ? "30 يومًا" : "7 أيام"}</Button></div></CardContent></Card>{report.isLoading ? <Card className="rounded-2xl"><CardContent className="p-10 text-center text-sm text-slate-500">جارٍ إعداد تقرير التزام الفرق…</CardContent></Card> : report.isError ? <Card className="rounded-2xl border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30"><CardContent className="p-8 text-center"><AlertTriangle className="mx-auto h-7 w-7 text-red-600" /><p className="mt-3 font-semibold text-red-900 dark:text-red-100">لا يتوفر هذا التقرير لحسابك.</p><p className="mt-1 text-sm text-red-700 dark:text-red-200">يتطلب التقرير صلاحية عرض التقارير وإدارة المهام اليومية والوصول إلى السنة المحددة.</p></CardContent></Card> : report.data ? <><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"><Metric label="إجمالي المهام" value={report.data.summary.total} /><Metric label="المكتملة" value={report.data.summary.completed} tone="green" /><Metric label="المتأخرة" value={report.data.summary.overdue} tone="red" /><Metric label="غير المحدثة" value={report.data.summary.unupdated} tone="amber" /><Metric label="فرق تجاوزت العتبة" value={report.data.summary.teamsAtRisk} tone="red" /></div><ComplianceComparisonChart comparison={report.data.comparison} previousWeekStart={report.data.previousWeekStart} previousWeekEnd={report.data.previousWeekEnd} period={period} /><Card className="overflow-hidden rounded-2xl"><CardHeader><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle className="flex items-center gap-2 text-base"><UsersRound className="h-4 w-4 text-blue-700" />التفاصيل حسب فريق العمل</CardTitle><CardDescription>النطاق من {report.data.weekStart} إلى {report.data.weekEnd}؛ الترتيب يبدأ بالفرق المتجاوزة للعتبة.</CardDescription></div><span className="flex items-center gap-1 text-xs text-slate-500"><ShieldCheck className="h-4 w-4 text-emerald-600" />يطبق عزل السنة والصلاحيات في الخادم</span></div></CardHeader><CardContent className="overflow-x-auto p-0">{report.data.teams.length ? <table className="w-full min-w-[860px] text-right text-sm"><thead className="bg-slate-50 text-xs text-slate-500 dark:bg-slate-900"><tr><th className="px-5 py-3">الفريق</th><th className="px-4 py-3">الإجمالي</th><th className="px-4 py-3">المكتملة</th><th className="px-4 py-3">نسبة الإنجاز</th><th className="px-4 py-3">المتأخرة</th><th className="px-4 py-3">غير المحدثة</th><th className="px-4 py-3">العتبة</th><th className="px-4 py-3">الحالة</th></tr></thead><tbody>{report.data.teams.map(team => <tr key={team.teamName} className="border-t border-slate-100 dark:border-slate-800"><td className="px-5 py-4 font-semibold text-slate-800 dark:text-slate-100">{team.teamName}</td><td className="px-4 py-4">{team.total}</td><td className="px-4 py-4 text-emerald-700 dark:text-emerald-300">{team.completed}</td><td className="px-4 py-4 font-semibold">{team.completionRate}%</td><td className="px-4 py-4 text-red-700 dark:text-red-300">{team.overdue}</td><td className="px-4 py-4 text-amber-700 dark:text-amber-300">{team.unupdated}</td><td className="px-4 py-4">{team.threshold}</td><td className="px-4 py-4">{team.exceedsThreshold ? <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800 dark:bg-red-950/50 dark:text-red-200">تجاوز العتبة</span> : <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">ضمن العتبة</span>}</td></tr>)}</tbody></table> : <div className="p-10 text-center text-sm text-slate-500">لا توجد مهام يومية ضمن النطاق {periodLabel} المحدد.</div>}</CardContent></Card></> : null}</section></DashboardLayout>;
 }
 
 function ComplianceComparisonChart({ comparison, previousWeekStart, previousWeekEnd, period }: { comparison: Array<{ teamName: string; completionRate: number; previousCompletionRate: number; completionRateDelta: number; overdue: number; previousOverdue: number; overdueDelta: number }>; previousWeekStart: string | null; previousWeekEnd: string | null; period: "week" | "month" }) {

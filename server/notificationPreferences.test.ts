@@ -39,4 +39,19 @@ describe("تفضيلات كتم الإشعارات", () => {
     expect(section).toContain("eq(notifications.userId, ctx.user.id)");
     expect(section).toContain("archivedOnly");
   });
+
+  it("يحفظ سجل بحث الأرشيف لكل حساب بحد أقصى ويعرض الاقتراحات الشخصية", () => {
+    const preferences = readFileSync(new URL("./routers/dashboardPreferences.ts", import.meta.url), "utf8");
+    expect(preferences).toContain("archiveSearchHistory: router");
+    expect(preferences).toContain("archiveSearchText");
+    expect(preferences).toContain("eq(userPreferences.userId, ctx.user.id)");
+    expect(preferences).toContain("slice(0, 8)");
+    expect(preferences).toContain("archiveSearchHistory: history");
+    const ui = readFileSync(new URL("../client/src/pages/Notifications.tsx", import.meta.url), "utf8");
+    expect(ui).toContain("dashboardPreferences.archiveSearchHistory.get");
+    expect(ui).toContain("dashboardPreferences.archiveSearchHistory.record");
+    expect(ui).toContain("اقتراحات البحث");
+    expect(ui).toContain("عملياتك الأخيرة واقتراحات الفرق");
+    expect(ui).toContain("onBlur={() => commitArchiveSearch()}");
+  });
 });

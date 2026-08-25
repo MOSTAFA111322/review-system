@@ -141,4 +141,18 @@ describe("daily tasks import contract", () => {
     expect(ui).toContain('useState<"week" | "month">("week")');
     expect(ui).toContain("شهري — 30 يومًا");
   });
+
+  it("يوفر PDF وCSV شهريين وينبه المدير فقط عند تراجع الإنجاز بعشر نقاط أو أكثر", () => {
+    const complianceUi = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
+    expect(complianceUi).toContain('kind: "csv" | "xls" | "pdf"');
+    expect(complianceUi).toContain("downloadMonthlyPdf");
+    expect(complianceUi).toContain("PDF شهري");
+    expect(complianceUi).toContain("CSV شهري");
+    const dashboardUi = readFileSync(new URL("../client/src/pages/Dashboard.tsx", import.meta.url), "utf8");
+    expect(dashboardUi).toContain('period: "month" as const');
+    expect(dashboardUi).toContain("trpc.dailyTasks.weeklyTeamCompliance.useQuery");
+    expect(dashboardUi).toContain("completionRateDelta <= -10");
+    expect(dashboardUi).toContain("isManagerView && canViewReports && canManageDailyTasks");
+    expect(dashboardUi).toContain("تراجع التزام الفرق الشهري");
+  });
 });

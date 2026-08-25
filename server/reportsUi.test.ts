@@ -71,11 +71,15 @@ describe("تقرير التزام الفرق الأسبوعي", () => {
     expect(weeklyComplianceSource).toContain("لا يعرض أسماء الموظفين");
   });
 
-  it("يربط CSV وExcel والطباعة بنتيجة التصدير الخادمية فقط", () => {
+  it("يربط CSV وExcel وPDF الشهري والطباعة بنتيجة التصدير الخادمية فقط", () => {
     expect(weeklyComplianceSource).toContain("trpc.dailyTasks.weeklyTeamComplianceExport.useQuery");
     expect(weeklyComplianceSource).toContain("exported.refetch()");
     expect(weeklyComplianceSource).toContain("التزام-الفرق-");
     expect(weeklyComplianceSource).toContain("window.print()");
+    expect(weeklyComplianceSource).toContain("downloadMonthlyPdf");
+    expect(weeklyComplianceSource).toContain("jsPDF");
+    expect(weeklyComplianceSource).toContain("PDF شهري");
+    expect(weeklyComplianceSource).toContain("CSV شهري");
     expect(stylesSource).toContain(".weekly-compliance-print");
   });
 });
