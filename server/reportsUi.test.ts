@@ -82,6 +82,14 @@ describe("تقرير التزام الفرق الأسبوعي", () => {
     expect(weeklyComplianceSource).toContain("CSV شهري");
     expect(stylesSource).toContain(".weekly-compliance-print");
   });
+
+  it("يعرض نطاقًا مخصصًا ببداية ونهاية ويرسله ضمن عقد التقرير قبل التصدير", () => {
+    expect(weeklyComplianceSource).toContain("const [weekEnd, setWeekEnd]");
+    expect(weeklyComplianceSource).toContain("...(weekEnd ? { weekEnd } : {})");
+    expect(weeklyComplianceSource).toContain("بداية نطاق التقرير");
+    expect(weeklyComplianceSource).toContain("نهاية نطاق التقرير");
+    expect(weeklyComplianceSource).toContain("اختر البداية والنهاية لتقرير مخصص قبل التصدير");
+  });
 });
 
 describe("تصدير سجل التدقيق الإداري", () => {

@@ -1,11 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { dashboardAlertSettings, dashboardAlertSettingsActivity, dashboardTeamAlertSettings, employees, employeeStatuses, fiscalYears, operationTypes, permissions, reviewerStatuses, statusTransitions, users } from "../../drizzle/schema";
+import { dashboardAlertSettings, dashboardAlertSettingsActivity, dashboardComplianceDeclineSettingsActivity, dashboardTeamAlertSettings, employees, employeeStatuses, fiscalYears, operationTypes, permissions, reviewerStatuses, statusTransitions, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requirePermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
 import { notifyTeamOverdueThresholds } from "../teamOverdueAlerts";
+import { notifyTeamComplianceDeclines } from "../teamComplianceDeclineAlerts";
 
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#64748b");
 const sortOrder = z.number().int().min(0).max(10000).default(0);
@@ -153,19 +154,20 @@ const transitionsRouter = router({
 const dashboardAlertsRouter = router({
   get: protectedProcedure.query(async () => {
     const db = await database();
-    const [settings] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
-    return { overdueThreshold: settings?.overdueThreshold ?? 3 };
+    const [settings] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold, complianceDeclineThreshold: dashboardAlertSettings.complianceDeclineThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    return { overdueThreshold: settings?.overdueThreshold ?? 3, complianceDeclineThreshold: settings?.complianceDeclineThreshold ?? 10 };
   }),
   manageOverview: protectedProcedure.query(async ({ ctx }) => {
     await requireSettingsPermission(ctx.user);
     const db = await database();
-    const [global] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
-    const [teams, history] = await Promise.all([
+    const [global] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold, complianceDeclineThreshold: dashboardAlertSettings.complianceDeclineThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const [teams, history, complianceHistory] = await Promise.all([
       db.select({ teamName: employees.department }).from(employees).where(and(eq(employees.isActive, true), isNotNull(employees.department))).groupBy(employees.department).orderBy(asc(employees.department)),
       db.select({ id: dashboardAlertSettingsActivity.id, scope: dashboardAlertSettingsActivity.scope, teamName: dashboardAlertSettingsActivity.teamName, previousThreshold: dashboardAlertSettingsActivity.previousThreshold, nextThreshold: dashboardAlertSettingsActivity.nextThreshold, createdAt: dashboardAlertSettingsActivity.createdAt, actorName: users.name, actorUsername: users.username }).from(dashboardAlertSettingsActivity).leftJoin(users, eq(dashboardAlertSettingsActivity.actorUserId, users.id)).orderBy(desc(dashboardAlertSettingsActivity.createdAt)).limit(12),
+      db.select({ id: dashboardComplianceDeclineSettingsActivity.id, previousThreshold: dashboardComplianceDeclineSettingsActivity.previousThreshold, nextThreshold: dashboardComplianceDeclineSettingsActivity.nextThreshold, createdAt: dashboardComplianceDeclineSettingsActivity.createdAt, actorName: users.name, actorUsername: users.username }).from(dashboardComplianceDeclineSettingsActivity).leftJoin(users, eq(dashboardComplianceDeclineSettingsActivity.actorUserId, users.id)).orderBy(desc(dashboardComplianceDeclineSettingsActivity.createdAt)).limit(12),
     ]);
     const teamSettings = await db.select({ teamName: dashboardTeamAlertSettings.teamName, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold, updatedAt: dashboardTeamAlertSettings.updatedAt }).from(dashboardTeamAlertSettings).orderBy(asc(dashboardTeamAlertSettings.teamName));
-    return { globalThreshold: global?.overdueThreshold ?? 3, teams: teams.flatMap(team => team.teamName ? [team.teamName] : []), teamSettings, history };
+    return { globalThreshold: global?.overdueThreshold ?? 3, complianceDeclineThreshold: global?.complianceDeclineThreshold ?? 10, teams: teams.flatMap(team => team.teamName ? [team.teamName] : []), teamSettings, history, complianceHistory };
   }),
   update: protectedProcedure.input(z.object({ overdueThreshold: z.number().int().min(1).max(1000) })).mutation(async ({ ctx, input }) => {
     await requireSettingsPermission(ctx.user);
@@ -195,6 +197,20 @@ const dashboardAlertsRouter = router({
       await db.insert(dashboardAlertSettingsActivity).values({ scope: "team", teamName: input.teamName, previousThreshold, nextThreshold: input.overdueThreshold, actorUserId: ctx.user.id });
       const currentFiscalYears = await db.select({ id: fiscalYears.id }).from(fiscalYears).where(eq(fiscalYears.isCurrent, true));
       await Promise.all(currentFiscalYears.map(fiscalYear => notifyTeamOverdueThresholds(db, fiscalYear.id)));
+    }
+    return { success: true };
+  }),
+  updateComplianceDecline: protectedProcedure.input(z.object({ complianceDeclineThreshold: z.number().int().min(1).max(100) })).mutation(async ({ ctx, input }) => {
+    await requireSettingsPermission(ctx.user);
+    const db = await database();
+    const [current] = await db.select({ id: dashboardAlertSettings.id, complianceDeclineThreshold: dashboardAlertSettings.complianceDeclineThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const previousThreshold = current?.complianceDeclineThreshold ?? 10;
+    if (current) await db.update(dashboardAlertSettings).set({ complianceDeclineThreshold: input.complianceDeclineThreshold, updatedByUserId: ctx.user.id }).where(eq(dashboardAlertSettings.id, 1));
+    else await db.insert(dashboardAlertSettings).values({ id: 1, overdueThreshold: 3, complianceDeclineThreshold: input.complianceDeclineThreshold, updatedByUserId: ctx.user.id });
+    if (previousThreshold !== input.complianceDeclineThreshold) {
+      await db.insert(dashboardComplianceDeclineSettingsActivity).values({ previousThreshold, nextThreshold: input.complianceDeclineThreshold, actorUserId: ctx.user.id });
+      const currentFiscalYears = await db.select({ id: fiscalYears.id }).from(fiscalYears).where(eq(fiscalYears.isCurrent, true));
+      await Promise.all(currentFiscalYears.map(fiscalYear => notifyTeamComplianceDeclines(db, fiscalYear.id)));
     }
     return { success: true };
   }),

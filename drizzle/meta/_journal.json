@@ -134,6 +134,13 @@
       "when": 1787622454653,
       "tag": "0018_square_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1787630324951,
+      "tag": "0019_flawless_loners",
+      "breakpoints": true
     }
   ]
 }

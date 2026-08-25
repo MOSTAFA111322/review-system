@@ -6,6 +6,7 @@ import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
 import { notifyTeamOverdueThresholds } from "../teamOverdueAlerts";
+import { notifyTeamComplianceDeclines } from "../teamComplianceDeclineAlerts";
 
 const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "التاريخ يجب أن يكون بصيغة YYYY-MM-DD.");
 const priority = z.enum(["normal", "urgent", "critical"]);
@@ -59,8 +60,9 @@ const taskListInput = z.object({
 const weeklyTeamComplianceInput = z.object({
   fiscalYearId: z.number().int().positive(),
   weekStart: dateText.optional(),
+  weekEnd: dateText.optional(),
   period: z.enum(["week", "month"]).default("week"),
-});
+}).refine(value => !value.weekStart || !value.weekEnd || value.weekEnd >= value.weekStart, { message: "تاريخ نهاية النطاق يجب أن يساوي أو يتجاوز تاريخ البداية." });
 
 type WeeklyTaskRow = { teamName: string | null; taskDate: Date; status: "pending" | "in_progress" | "completed" | "skipped"; notes: string | null };
 
@@ -96,11 +98,15 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   fiscalEndExclusive.setUTCDate(fiscalEndExclusive.getUTCDate() + 1);
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const endExclusive = new Date(Math.min(today.getTime() + 24 * 60 * 60 * 1000, fiscalEndExclusive.getTime()));
+  const latestEndExclusive = new Date(Math.min(today.getTime() + 24 * 60 * 60 * 1000, fiscalEndExclusive.getTime()));
   const periodDays = input.period === "month" ? 30 : 7;
+  const requestedEndExclusive = input.weekEnd ? new Date(`${input.weekEnd}T00:00:00.000Z`) : latestEndExclusive;
+  requestedEndExclusive.setUTCDate(requestedEndExclusive.getUTCDate() + Number(Boolean(input.weekEnd)));
+  if (requestedEndExclusive.getTime() > latestEndExclusive.getTime() || requestedEndExclusive.getTime() <= fiscalStart.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "نهاية النطاق يجب أن تقع داخل السنة المالية المنقضية." });
+  const endExclusive = requestedEndExclusive;
   const requestedStart = input.weekStart ? new Date(`${input.weekStart}T00:00:00.000Z`) : new Date(endExclusive.getTime() - periodDays * 24 * 60 * 60 * 1000);
   const weekStart = new Date(Math.max(fiscalStart.getTime(), requestedStart.getTime()));
-  if (weekStart.getTime() >= endExclusive.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية الأسبوع يجب أن تقع ضمن نطاق السنة المالية المنقضي." });
+  if (weekStart.getTime() >= endExclusive.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية النطاق يجب أن تقع قبل نهايته داخل السنة المالية المنقضية." });
   const periodDuration = endExclusive.getTime() - weekStart.getTime();
   const previousEndExclusive = new Date(weekStart);
   const previousWeekStart = new Date(Math.max(fiscalStart.getTime(), weekStart.getTime() - periodDuration));
@@ -127,7 +133,7 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
       const previous = previousByTeam.get(team.teamName);
       const previousCompletionRate = previous?.completionRate ?? 0;
       const previousOverdue = previous?.overdue ?? 0;
-      return { teamName: team.teamName, completionRate: team.completionRate, previousCompletionRate, completionRateDelta: team.completionRate - previousCompletionRate, overdue: team.overdue, previousOverdue, overdueDelta: team.overdue - previousOverdue };
+      return { teamName: team.teamName, total: team.total, previousTotal: previous?.total ?? 0, completionRate: team.completionRate, previousCompletionRate, completionRateDelta: team.completionRate - previousCompletionRate, overdue: team.overdue, previousOverdue, overdueDelta: team.overdue - previousOverdue };
     }),
   };
 }
@@ -211,6 +217,7 @@ export const dailyTasksRouter = router({
     }
     const [result] = await db.insert(dailyTasks).values({ fiscalYearId: input.fiscalYearId, employeeId: input.employeeId, reviewId: input.reviewId ?? null, title: input.title, description: input.description, notes: input.notes, taskDate: new Date(`${input.taskDate}T00:00:00.000Z`), dueTime: input.dueTime, priority: input.priority, source: input.reviewId ? "review" : "manual", createdByUserId: ctx.user.id });
     await notifyTeamOverdueThresholds(db, input.fiscalYearId);
+    await notifyTeamComplianceDeclines(db, input.fiscalYearId);
     return { id: Number(result.insertId) };
   }),
 
@@ -240,6 +247,7 @@ export const dailyTasksRouter = router({
     if (repeatedRows.length > 0) throw new TRPCError({ code: "CONFLICT", message: `يوجد ${repeatedRows.length} من المهام موجودة مسبقًا. لم يتم استيراد أي صف لتجنب التكرار.` });
     await db.insert(dailyTasks).values(input.rows.map(row => ({ ...row, fiscalYearId: input.fiscalYearId, taskDate: new Date(`${row.taskDate}T00:00:00.000Z`), source: "imported" as const, createdByUserId: ctx.user.id })));
     await notifyTeamOverdueThresholds(db, input.fiscalYearId);
+    await notifyTeamComplianceDeclines(db, input.fiscalYearId);
     return { imported: input.rows.length };
   }),
 
@@ -256,6 +264,7 @@ export const dailyTasksRouter = router({
     }
     await db.update(dailyTasks).set({ status: input.status, notes: input.notes, completedAt: input.status === "completed" ? new Date() : null, completedByUserId: input.status === "completed" ? ctx.user.id : null }).where(eq(dailyTasks.id, input.id));
     await notifyTeamOverdueThresholds(db, task.fiscalYearId);
+    await notifyTeamComplianceDeclines(db, task.fiscalYearId);
     return { success: true };
   }),
 

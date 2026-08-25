@@ -142,7 +142,7 @@ describe("daily tasks import contract", () => {
     expect(ui).toContain("شهري — 30 يومًا");
   });
 
-  it("يوفر PDF وCSV شهريين وينبه المدير فقط عند تراجع الإنجاز بعشر نقاط أو أكثر", () => {
+  it("يوفر PDF وCSV شهريين وينبه المدير فقط عند تراجع الإنجاز وفق العتبة الإدارية", () => {
     const complianceUi = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
     expect(complianceUi).toContain('kind: "csv" | "xls" | "pdf"');
     expect(complianceUi).toContain("downloadMonthlyPdf");
@@ -151,8 +151,22 @@ describe("daily tasks import contract", () => {
     const dashboardUi = readFileSync(new URL("../client/src/pages/Dashboard.tsx", import.meta.url), "utf8");
     expect(dashboardUi).toContain('period: "month" as const');
     expect(dashboardUi).toContain("trpc.dailyTasks.weeklyTeamCompliance.useQuery");
-    expect(dashboardUi).toContain("completionRateDelta <= -10");
+    expect(dashboardUi).toContain("completionRateDelta <= -complianceDeclineThreshold");
+    expect(dashboardUi).toContain("trpc.settings.dashboardAlerts.get.useQuery");
     expect(dashboardUi).toContain("isManagerView && canViewReports && canManageDailyTasks");
     expect(dashboardUi).toContain("تراجع التزام الفرق الشهري");
+  });
+
+  it("يقبل نطاقًا مخصصًا من الخادم ضمن السنة المالية المنقضية ويشغل إشعار التراجع بعد تغير المهمة", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    const reportSection = source.slice(source.indexOf("const weeklyTeamComplianceInput"), source.indexOf("export const dailyTasksRouter"));
+    expect(reportSection).toContain("weekEnd: dateText.optional()");
+    expect(reportSection).toContain("latestEndExclusive");
+    expect(reportSection).toContain("نهاية النطاق يجب أن تقع داخل السنة المالية المنقضية");
+    expect(source).toContain("notifyTeamComplianceDeclines");
+    const settings = readFileSync(new URL("./routers/settings.ts", import.meta.url), "utf8");
+    expect(settings).toContain("updateComplianceDecline");
+    expect(settings).toContain("dashboardComplianceDeclineSettingsActivity");
+    expect(settings).toContain("PERMISSIONS.SETTINGS_MANAGE");
   });
 });

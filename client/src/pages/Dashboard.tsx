@@ -65,11 +65,11 @@ function DelayAlert({ data, onOpen: _onOpen }: { data: OperationalIndicators; on
   return <section role="alert" aria-live="polite" className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${escalating ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/80 dark:bg-red-950/50 dark:text-red-100" : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/80 dark:bg-amber-950/45 dark:text-amber-100"}`}><div className="flex items-start gap-3"><span className={`rounded-xl p-2.5 ${escalating ? "bg-red-600 text-white" : "bg-amber-500 text-white"}`}><AlertTriangle className="h-5 w-5" /></span><div><p className="font-bold">{alert.title}</p><p className="mt-1 text-sm leading-6 opacity-85">{alert.description} راجع قائمة المهام ودوّن سبب التأخير أو حدّث الحالة.</p></div></div><button type="button" onClick={() => setLocation("/daily-tasks?view=overdue")} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${escalating ? "bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-600 dark:bg-red-500 dark:hover:bg-red-400" : "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500 dark:bg-amber-500 dark:hover:bg-amber-400"}`}>فتح المهام المتأخرة</button></section>;
 }
 
-function MonthlyComplianceDeclineAlert({ teams, onOpen }: { teams: Array<{ teamName: string; completionRateDelta: number; completionRate: number; previousCompletionRate: number }>; onOpen: () => void }) {
+function MonthlyComplianceDeclineAlert({ teams, threshold, onOpen }: { teams: Array<{ teamName: string; completionRateDelta: number; completionRate: number; previousCompletionRate: number }>; threshold: number; onOpen: () => void }) {
   if (!teams.length) return null;
   const names = teams.slice(0, 3).map(team => team.teamName).join("، ");
   const more = teams.length > 3 ? ` و${teams.length - 3} فرق أخرى` : "";
-  return <section role="alert" aria-live="polite" className="flex flex-col gap-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-950 shadow-sm dark:border-rose-900/80 dark:bg-rose-950/45 dark:text-rose-100 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><span className="rounded-xl bg-rose-600 p-2.5 text-white"><TrendingUp className="h-5 w-5 rotate-180" /></span><div><p className="font-bold">تراجع التزام الفرق الشهري</p><p className="mt-1 text-sm leading-6 opacity-90">انخفضت نسبة الإنجاز بمقدار 10 نقاط مئوية أو أكثر لدى {teams.length} فرق مقارنة بالفترة الشهرية السابقة: {names}{more}. راجع تفاصيل التقرير قبل توزيع الإجراءات.</p></div></div><button type="button" onClick={onOpen} className="shrink-0 rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 dark:bg-rose-500 dark:hover:bg-rose-400">فتح التقرير الشهري</button></section>;
+  return <section role="alert" aria-live="polite" className="flex flex-col gap-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-950 shadow-sm dark:border-rose-900/80 dark:bg-rose-950/45 dark:text-rose-100 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><span className="rounded-xl bg-rose-600 p-2.5 text-white"><TrendingUp className="h-5 w-5 rotate-180" /></span><div><p className="font-bold">تراجع التزام الفرق الشهري</p><p className="mt-1 text-sm leading-6 opacity-90">انخفضت نسبة الإنجاز بمقدار {threshold} نقاط مئوية أو أكثر لدى {teams.length} فرق مقارنة بالفترة الشهرية السابقة: {names}{more}. راجع تفاصيل التقرير قبل توزيع الإجراءات.</p></div></div><button type="button" onClick={onOpen} className="shrink-0 rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600 focus-visible:ring-offset-2 dark:bg-rose-500 dark:hover:bg-rose-400">فتح التقرير الشهري</button></section>;
 }
 
 function OperationalHealth({ data, manager }: { data: OperationalIndicators; manager: boolean }) {
@@ -133,6 +133,7 @@ export default function Dashboard() {
   const operationalInput = useMemo(() => ({ fiscalYearId: fiscalYearId ?? 0, ...(periodReady ? { startDate: dateRange.startDate, endDate: dateRange.endDate } : {}) }), [dateRange.endDate, dateRange.startDate, fiscalYearId, periodReady]);
   const rentInput = useMemo(() => ({ fiscalYearId: fiscalYearId ?? 0, ...(periodReady ? { fromDate: dateRange.startDate, toDate: dateRange.endDate } : {}) }), [dateRange.endDate, dateRange.startDate, fiscalYearId, periodReady]);
   const monthlyComplianceInput = useMemo(() => ({ fiscalYearId: fiscalYearId ?? 0, period: "month" as const }), [fiscalYearId]);
+  const complianceSettings = trpc.settings.dashboardAlerts.get.useQuery();
   const overview = trpc.analytics.overview.useQuery(overviewInput, { enabled: Boolean(periodReady && canViewReports) });
   const taskIndicators = trpc.dailyTasks.operationalIndicators.useQuery(operationalInput, { enabled: Boolean(periodReady && canViewDailyTasks) });
   const rentSummary = trpc.rentFollowUps.summary.useQuery(rentInput, { enabled: Boolean(periodReady && canViewRentFollowUps && isManagerView) });
@@ -143,7 +144,8 @@ export default function Dashboard() {
   const rentData = periodReady ? rentSummary.data as RentSummary | undefined : undefined;
   const criticalReviews = data?.priorityBreakdown.find(item => item.priority === "critical")?.count ?? 0;
   const monthlyTeamsByName = new Map(monthlyCompliance.data?.teams.map(team => [team.teamName, team]) ?? []);
-  const decliningTeams = monthlyCompliance.data?.previousWeekStart ? monthlyCompliance.data.comparison.filter(team => team.completionRateDelta <= -10 && (monthlyTeamsByName.get(team.teamName)?.total ?? 0) > 0) : [];
+  const complianceDeclineThreshold = complianceSettings.data?.complianceDeclineThreshold ?? 10;
+  const decliningTeams = monthlyCompliance.data?.previousWeekStart ? monthlyCompliance.data.comparison.filter(team => team.completionRateDelta <= -complianceDeclineThreshold && team.total > 0 && team.previousTotal > 0) : [];
   const shownMonthlyDecline = useRef<string | null>(null);
   useEffect(() => {
     if (!isManagerView || !canViewReports || !canManageDailyTasks || !decliningTeams.length) return;
@@ -151,11 +153,11 @@ export default function Dashboard() {
     if (shownMonthlyDecline.current === signature) return;
     shownMonthlyDecline.current = signature;
     toast.warning("تراجع التزام الفرق الشهري", {
-      description: `انخفض التزام ${decliningTeams.length} فرق بمقدار 10 نقاط مئوية أو أكثر مقارنة بالفترة السابقة.`,
+      description: `انخفض التزام ${decliningTeams.length} فرق بمقدار ${complianceDeclineThreshold} نقاط مئوية أو أكثر مقارنة بالفترة السابقة.`,
       action: { label: "فتح التقرير الشهري", onClick: () => setLocation("/reports/team-compliance") },
       duration: 12000,
     });
-  }, [canManageDailyTasks, canViewReports, decliningTeams, isManagerView, setLocation]);
+  }, [canManageDailyTasks, canViewReports, complianceDeclineThreshold, decliningTeams, isManagerView, setLocation]);
   const fiscalStart = toDateInput(activeYear?.startDate);
   const fiscalEnd = toDateInput(activeYear?.endDate);
   const actions = [canViewReports ? { label: "لوحة المراجعات", detail: "متابعة العمليات", icon: ClipboardCheck, path: "/" } : null, canViewDailyTasks ? { label: "المهام اليومية", detail: "الجدول والحالة", icon: ClipboardCheck, path: "/daily-tasks" } : null, canViewReports ? { label: "تقارير الأداء", detail: "التقارير والتصدير", icon: TrendingUp, path: "/reports" } : null, canViewRentFollowUps ? { label: "متابعة الإيجارات", detail: "السداد والترحيل", icon: Landmark, path: "/rent-follow-ups" } : null, canManageUsers ? { label: "إدارة المستخدمين", detail: "حسابات وصلاحيات", icon: UsersRound, path: "/users" } : null].filter((action): action is { label: string; detail: string; icon: LucideIcon; path: string } => Boolean(action));

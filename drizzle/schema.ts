@@ -597,6 +597,8 @@ export const userPreferences = mysqlTable("user_preferences", {
 export const dashboardAlertSettings = mysqlTable("dashboard_alert_settings", {
   id: int("id").primaryKey(),
   overdueThreshold: int("overdueThreshold").default(3).notNull(),
+  /** عدد النقاط المئوية لانخفاض إنجاز الفريق قبل إظهار تنبيه الالتزام الشهري. */
+  complianceDeclineThreshold: int("complianceDeclineThreshold").default(10).notNull(),
   updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
   ...auditTimestamps,
 });
@@ -627,6 +629,19 @@ export const dashboardAlertSettingsActivity = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => [index("dashboard_alert_activity_created_idx").on(table.createdAt), index("dashboard_alert_activity_team_idx").on(table.teamName, table.createdAt)],
+);
+
+/** سجل مستقل لتدقيق تغييرات عتبة تراجع التزام الفرق الشهرية. */
+export const dashboardComplianceDeclineSettingsActivity = mysqlTable(
+  "dashboard_compliance_decline_settings_activity",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    previousThreshold: int("previousThreshold").notNull(),
+    nextThreshold: int("nextThreshold").notNull(),
+    actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [index("dashboard_compliance_decline_activity_created_idx").on(table.createdAt)],
 );
 
 export type User = typeof users.$inferSelect;
