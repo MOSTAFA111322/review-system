@@ -560,12 +560,15 @@ export const notifications = mysqlTable("notifications", {
     body: text("body"),
     link: varchar("link", { length: 512 }),
     readAt: timestamp("readAt"),
+    /** الأرشفة تنظف الواجهة من دون حذف إشعار الحساب أو سجله. */
+    archivedAt: timestamp("archivedAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => [
     index("notifications_user_read_idx").on(table.userId, table.readAt, table.createdAt),
     index("notifications_user_importance_idx").on(table.userId, table.importance, table.createdAt),
     index("notifications_user_team_idx").on(table.userId, table.teamName, table.createdAt),
+    index("notifications_user_archived_idx").on(table.userId, table.archivedAt, table.createdAt),
   ],
 );
 

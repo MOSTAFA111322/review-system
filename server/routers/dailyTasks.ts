@@ -99,18 +99,33 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   const requestedStart = input.weekStart ? new Date(`${input.weekStart}T00:00:00.000Z`) : new Date(endExclusive.getTime() - 7 * 24 * 60 * 60 * 1000);
   const weekStart = new Date(Math.max(fiscalStart.getTime(), requestedStart.getTime()));
   if (weekStart.getTime() >= endExclusive.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية الأسبوع يجب أن تقع ضمن نطاق السنة المالية المنقضي." });
-  const [rows, globalSettings, teamSettings] = await Promise.all([
+  const periodDuration = endExclusive.getTime() - weekStart.getTime();
+  const previousEndExclusive = new Date(weekStart);
+  const previousWeekStart = new Date(Math.max(fiscalStart.getTime(), weekStart.getTime() - periodDuration));
+  const hasPreviousPeriod = previousWeekStart.getTime() < previousEndExclusive.getTime();
+  const [rows, previousRows, globalSettings, teamSettings] = await Promise.all([
     db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, weekStart), lt(dailyTasks.taskDate, endExclusive))),
+    hasPreviousPeriod ? db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, previousWeekStart), lt(dailyTasks.taskDate, previousEndExclusive))) : Promise.resolve([]),
     db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1),
     db.select({ teamName: dashboardTeamAlertSettings.teamName, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold }).from(dashboardTeamAlertSettings),
   ]);
   const teams = buildWeeklyTeamCompliance(rows, globalSettings[0]?.overdueThreshold ?? 3, teamSettings, now);
+  const previousTeams = buildWeeklyTeamCompliance(previousRows, globalSettings[0]?.overdueThreshold ?? 3, teamSettings, previousEndExclusive);
+  const previousByTeam = new Map(previousTeams.map(team => [team.teamName, team]));
   return {
     fiscalYearId: input.fiscalYearId,
     weekStart: weekStart.toISOString().slice(0, 10),
     weekEnd: new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    previousWeekStart: hasPreviousPeriod ? previousWeekStart.toISOString().slice(0, 10) : null,
+    previousWeekEnd: hasPreviousPeriod ? new Date(previousEndExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10) : null,
     summary: teams.reduce((summary, team) => ({ total: summary.total + team.total, completed: summary.completed + team.completed, overdue: summary.overdue + team.overdue, unupdated: summary.unupdated + team.unupdated, teamsAtRisk: summary.teamsAtRisk + Number(team.exceedsThreshold) }), { total: 0, completed: 0, overdue: 0, unupdated: 0, teamsAtRisk: 0 }),
     teams,
+    comparison: teams.map(team => {
+      const previous = previousByTeam.get(team.teamName);
+      const previousCompletionRate = previous?.completionRate ?? 0;
+      const previousOverdue = previous?.overdue ?? 0;
+      return { teamName: team.teamName, completionRate: team.completionRate, previousCompletionRate, completionRateDelta: team.completionRate - previousCompletionRate, overdue: team.overdue, previousOverdue, overdueDelta: team.overdue - previousOverdue };
+    }),
   };
 }
 
@@ -289,7 +304,7 @@ export const dailyTasksRouter = router({
     if (input.startDate) { const start = new Date(`${input.startDate}T00:00:00.000Z`); taskConditions.push(gte(dailyTasks.taskDate, start)); reviewConditions.push(gte(reviews.createdAt, start)); }
     if (input.endDate) { const end = new Date(`${input.endDate}T23:59:59.999Z`); taskConditions.push(lte(dailyTasks.taskDate, end)); reviewConditions.push(lte(reviews.createdAt, end)); }
     const [daily, reviewRows] = await Promise.all([
-      db.select({ id: dailyTasks.id, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, title: dailyTasks.title, notes: dailyTasks.notes, taskDate: dailyTasks.taskDate, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, reviewId: dailyTasks.reviewId }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...taskConditions)).orderBy(desc(dailyTasks.taskDate)),
+      db.select({ id: dailyTasks.id, employeeId: dailyTasks.employeeId, employeeName: employees.displayName, title: dailyTasks.title, description: dailyTasks.description, notes: dailyTasks.notes, taskDate: dailyTasks.taskDate, dueTime: dailyTasks.dueTime, priority: dailyTasks.priority, status: dailyTasks.status, source: dailyTasks.source, reviewId: dailyTasks.reviewId, completedAt: dailyTasks.completedAt }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(...taskConditions)).orderBy(desc(dailyTasks.taskDate)),
       db.select({ id: reviews.id, internalRef: reviews.internalRef, title: reviews.title, dueDate: reviews.dueDate, priority: reviews.priority, employeeId: reviews.assignedEmployeeId, employeeName: employees.displayName, reviewerStatus: reviewerStatuses.name, employeeStatus: employeeStatuses.name, operationType: operationTypes.name }).from(reviews).leftJoin(employees, eq(reviews.assignedEmployeeId, employees.id)).innerJoin(reviewerStatuses, eq(reviews.reviewerStatusId, reviewerStatuses.id)).innerJoin(employeeStatuses, eq(reviews.employeeStatusId, employeeStatuses.id)).innerJoin(operationTypes, eq(reviews.operationTypeId, operationTypes.id)).where(and(...reviewConditions)).orderBy(desc(reviews.createdAt)),
     ]);
     return { employeeId: employeeId ?? null, employeeName: daily[0]?.employeeName ?? reviewRows[0]?.employeeName ?? null, dailyTasks: daily, reviews: reviewRows };

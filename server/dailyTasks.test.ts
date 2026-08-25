@@ -89,4 +89,28 @@ describe("daily tasks import contract", () => {
     expect(reportSection).toContain("PERMISSIONS.DAILY_TASKS_MANAGE");
     expect(source).toContain("await requireFiscalYearAccess(user, input.fiscalYearId)");
   });
+
+  it("يبني مقارنة الأسبوع السابق من بيانات الفرق الفعلية ويعرضها في التصدير", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    const reportSection = source.slice(source.indexOf("getWeeklyTeamComplianceReport"), source.indexOf("export const dailyTasksRouter"));
+    expect(reportSection).toContain("previousWeekStart");
+    expect(reportSection).toContain("completionRateDelta");
+    expect(reportSection).toContain("overdueDelta");
+    const uiSource = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
+    expect(uiSource).toContain("مقارنة الإنجاز بالأسبوع السابق");
+    expect(uiSource).toContain("previousCompletionRate");
+    expect(uiSource).toContain("فرق الإنجاز");
+  });
+
+  it("يعرض التقرير الموحد وصف المهمة ووقتها وتاريخ إنجازها من الحقول المخزنة", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    const reportSection = source.slice(source.indexOf("unifiedReport:"));
+    expect(reportSection).toContain("description: dailyTasks.description");
+    expect(reportSection).toContain("dueTime: dailyTasks.dueTime");
+    expect(reportSection).toContain("completedAt: dailyTasks.completedAt");
+    const uiSource = readFileSync(new URL("../client/src/pages/DailyTasks.tsx", import.meta.url), "utf8");
+    expect(uiSource).toContain("المهمة والتفاصيل");
+    expect(uiSource).toContain("تاريخ الإنجاز");
+    expect(uiSource).toContain("sourceLabel(task.source)");
+  });
 });

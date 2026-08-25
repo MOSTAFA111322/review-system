@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { extname } from "node:path";
 import { z } from "zod";
@@ -262,6 +262,7 @@ export const attachmentsRouter = router({
 export const notificationsRouter = router({
   list: protectedProcedure.input(z.object({
     unreadOnly: z.boolean().default(false),
+    archivedOnly: z.boolean().default(false),
     importance: z.enum(["normal", "warning", "critical"]).optional(),
     teamName: z.string().trim().min(1).max(160).optional(),
     type: z.string().trim().min(1).max(64).optional(),
@@ -269,11 +270,21 @@ export const notificationsRouter = router({
   }).optional()).query(async ({ ctx, input }) => {
     const db = await database();
     const conditions = [eq(notifications.userId, ctx.user.id)];
+    conditions.push(input?.archivedOnly ? isNotNull(notifications.archivedAt) : isNull(notifications.archivedAt));
     if (input?.unreadOnly) conditions.push(isNull(notifications.readAt));
     if (input?.importance) conditions.push(eq(notifications.importance, input.importance));
     if (input?.teamName) conditions.push(eq(notifications.teamName, input.teamName));
     if (input?.type) conditions.push(eq(notifications.type, input.type));
     return db.select().from(notifications).where(and(...conditions)).orderBy(desc(notifications.createdAt)).limit(input?.limit ?? 100);
+  }),
+  summary: protectedProcedure.query(async ({ ctx }) => {
+    const db = await database();
+    const archiveCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [critical, archivable] = await Promise.all([
+      db.select({ total: count() }).from(notifications).where(and(eq(notifications.userId, ctx.user.id), eq(notifications.importance, "critical"), isNull(notifications.readAt), isNull(notifications.archivedAt))),
+      db.select({ total: count() }).from(notifications).where(and(eq(notifications.userId, ctx.user.id), isNull(notifications.archivedAt), lt(notifications.createdAt, archiveCutoff))),
+    ]);
+    return { criticalUnread: Number(critical[0]?.total ?? 0), archivableOlderThan30Days: Number(archivable[0]?.total ?? 0) };
   }),
   markRead: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const db = await database();
@@ -282,11 +293,17 @@ export const notificationsRouter = router({
   }),
   markAllRead: protectedProcedure.input(z.object({ importance: z.enum(["normal", "warning", "critical"]).optional(), teamName: z.string().trim().min(1).max(160).optional() }).optional()).mutation(async ({ ctx, input }) => {
     const db = await database();
-    const conditions = [eq(notifications.userId, ctx.user.id), isNull(notifications.readAt)];
+    const conditions = [eq(notifications.userId, ctx.user.id), isNull(notifications.readAt), isNull(notifications.archivedAt)];
     if (input?.importance) conditions.push(eq(notifications.importance, input.importance));
     if (input?.teamName) conditions.push(eq(notifications.teamName, input.teamName));
     await db.update(notifications).set({ readAt: new Date() }).where(and(...conditions));
     return { success: true };
+  }),
+  archiveOlderThan30Days: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await database();
+    const archiveCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [result] = await db.update(notifications).set({ archivedAt: new Date() }).where(and(eq(notifications.userId, ctx.user.id), isNull(notifications.archivedAt), lt(notifications.createdAt, archiveCutoff)));
+    return { archived: Number(result.affectedRows ?? 0) };
   }),
   muteStatus: protectedProcedure.query(async ({ ctx }) => {
     const db = await database();
