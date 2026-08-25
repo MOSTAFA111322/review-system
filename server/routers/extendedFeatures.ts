@@ -305,6 +305,11 @@ export const notificationsRouter = router({
     const [result] = await db.update(notifications).set({ archivedAt: new Date() }).where(and(eq(notifications.userId, ctx.user.id), isNull(notifications.archivedAt), lt(notifications.createdAt, archiveCutoff)));
     return { archived: Number(result.affectedRows ?? 0) };
   }),
+  restoreArchived: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    const db = await database();
+    const [result] = await db.update(notifications).set({ archivedAt: null }).where(and(eq(notifications.id, input.id), eq(notifications.userId, ctx.user.id), isNotNull(notifications.archivedAt)));
+    return { restored: Number(result.affectedRows ?? 0) };
+  }),
   muteStatus: protectedProcedure.query(async ({ ctx }) => {
     const db = await database();
     const [row] = await db.select({ preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);

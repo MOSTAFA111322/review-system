@@ -113,4 +113,17 @@ describe("daily tasks import contract", () => {
     expect(uiSource).toContain("تاريخ الإنجاز");
     expect(uiSource).toContain("sourceLabel(task.source)");
   });
+
+  it("يوفر فلاتر سريعة للمصدر والاستحقاق وتفاصيل تفاعلية قابلة للوصول للرسم المقارن", () => {
+    const tasksUi = readFileSync(new URL("../client/src/pages/DailyTasks.tsx", import.meta.url), "utf8");
+    expect(tasksUi).toContain("sourceFilter");
+    expect(tasksUi).toContain("تصفية المهام حسب المصدر");
+    expect(tasksUi).toContain("نطاق تاريخ الاستحقاق");
+    expect(tasksUi).toContain("sourceFilter === \"all\" || task.source === sourceFilter");
+    const complianceUi = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
+    expect(complianceUi).toContain("onMouseEnter");
+    expect(complianceUi).toContain("onFocus");
+    expect(complianceUi).toContain('role="tooltip"');
+    expect(complianceUi).toContain("previousOverdue");
+  });
 });

@@ -22,8 +22,11 @@ describe("تفضيلات كتم الإشعارات", () => {
     const section = source.slice(source.indexOf("notificationsRouter"), source.indexOf("rentalsRouter"));
     expect(section).toContain("criticalUnread");
     expect(section).toContain("archiveOlderThan30Days");
+    expect(section).toContain("restoreArchived");
     expect(section).toContain("eq(notifications.userId, ctx.user.id)");
     expect(section).toContain("isNull(notifications.archivedAt)");
+    expect(section).toContain("isNotNull(notifications.archivedAt)");
     expect(section).toContain("archivedAt: new Date()");
+    expect(section).toContain("archivedAt: null");
   });
 });
