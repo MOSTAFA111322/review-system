@@ -552,13 +552,21 @@ export const notifications = mysqlTable("notifications", {
     id: int("id").autoincrement().primaryKey(),
     userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
     type: varchar("type", { length: 64 }).notNull(),
+    /** أهمية منظمة لتصفية المركز دون تحليل النصوص. */
+    importance: mysqlEnum("importance", ["normal", "warning", "critical"]).default("normal").notNull(),
+    /** الفريق التشغيلي (قسم الموظف) المرتبط بالتنبيه عند وجوده. */
+    teamName: varchar("teamName", { length: 160 }),
     title: varchar("title", { length: 200 }).notNull(),
     body: text("body"),
     link: varchar("link", { length: 512 }),
     readAt: timestamp("readAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
-  table => [index("notifications_user_read_idx").on(table.userId, table.readAt, table.createdAt)],
+  table => [
+    index("notifications_user_read_idx").on(table.userId, table.readAt, table.createdAt),
+    index("notifications_user_importance_idx").on(table.userId, table.importance, table.createdAt),
+    index("notifications_user_team_idx").on(table.userId, table.teamName, table.createdAt),
+  ],
 );
 
 export const loginActivity = mysqlTable(

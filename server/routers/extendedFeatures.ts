@@ -1,14 +1,15 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { extname } from "node:path";
 import { z } from "zod";
-import { attachments, customFieldOptions, customFields, customFieldValues, employeeStatuses, employees, notifications, operationTypeFields, operationTypes, reviewerStatuses, reviewActivityLog, reviews, users } from "../../drizzle/schema";
+import { attachments, customFieldOptions, customFields, customFieldValues, employeeStatuses, employees, notifications, operationTypeFields, operationTypes, reviewerStatuses, reviewActivityLog, reviews, userPreferences, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission } from "../rbac";
 import { storageGetSignedUrl, storagePut } from "../storage";
 import { protectedProcedure, router } from "../_core/trpc";
 import { enforceReviewVisibility } from "./reviews";
+import { isNotificationMuted, readNotificationMuteUntil } from "../notificationPreferences";
 
 const fieldType = z.enum(["text", "textarea", "number", "currency", "date", "email", "url", "select", "multi_select", "boolean", "employee", "user", "reviewer_status", "employee_status"]);
 const optionFieldTypes = new Set(["select", "multi_select"]);
@@ -259,20 +260,58 @@ export const attachmentsRouter = router({
 });
 
 export const notificationsRouter = router({
-  list: protectedProcedure.input(z.object({ unreadOnly: z.boolean().default(false) }).optional()).query(async ({ ctx, input }) => {
+  list: protectedProcedure.input(z.object({
+    unreadOnly: z.boolean().default(false),
+    importance: z.enum(["normal", "warning", "critical"]).optional(),
+    teamName: z.string().trim().min(1).max(160).optional(),
+    type: z.string().trim().min(1).max(64).optional(),
+    limit: z.number().int().min(1).max(200).default(100),
+  }).optional()).query(async ({ ctx, input }) => {
     const db = await database();
     const conditions = [eq(notifications.userId, ctx.user.id)];
     if (input?.unreadOnly) conditions.push(isNull(notifications.readAt));
-    return db.select().from(notifications).where(and(...conditions)).orderBy(asc(notifications.createdAt));
+    if (input?.importance) conditions.push(eq(notifications.importance, input.importance));
+    if (input?.teamName) conditions.push(eq(notifications.teamName, input.teamName));
+    if (input?.type) conditions.push(eq(notifications.type, input.type));
+    return db.select().from(notifications).where(and(...conditions)).orderBy(desc(notifications.createdAt)).limit(input?.limit ?? 100);
   }),
   markRead: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const db = await database();
     await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.id, input.id), eq(notifications.userId, ctx.user.id)));
     return { success: true };
   }),
-  markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
+  markAllRead: protectedProcedure.input(z.object({ importance: z.enum(["normal", "warning", "critical"]).optional(), teamName: z.string().trim().min(1).max(160).optional() }).optional()).mutation(async ({ ctx, input }) => {
     const db = await database();
-    await db.update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.userId, ctx.user.id), isNull(notifications.readAt)));
+    const conditions = [eq(notifications.userId, ctx.user.id), isNull(notifications.readAt)];
+    if (input?.importance) conditions.push(eq(notifications.importance, input.importance));
+    if (input?.teamName) conditions.push(eq(notifications.teamName, input.teamName));
+    await db.update(notifications).set({ readAt: new Date() }).where(and(...conditions));
+    return { success: true };
+  }),
+  muteStatus: protectedProcedure.query(async ({ ctx }) => {
+    const db = await database();
+    const [row] = await db.select({ preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);
+    const muteUntil = readNotificationMuteUntil(row?.preferences);
+    return { muted: isNotificationMuted(row?.preferences), muteUntil: muteUntil && muteUntil.getTime() > Date.now() ? muteUntil : null };
+  }),
+  setMute: protectedProcedure.input(z.object({ muteUntil: z.string().datetime({ offset: true }) })).mutation(async ({ ctx, input }) => {
+    const muteUntil = new Date(input.muteUntil);
+    const maxMuteUntil = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
+    if (muteUntil.getTime() <= Date.now() || muteUntil > maxMuteUntil) throw new TRPCError({ code: "BAD_REQUEST", message: "يجب أن تكون مدة الكتم مستقبلية ولا تتجاوز 30 يومًا." });
+    const db = await database();
+    const [existing] = await db.select({ id: userPreferences.id, preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);
+    const preferences = { ...(existing?.preferences && typeof existing.preferences === "object" && !Array.isArray(existing.preferences) ? existing.preferences as Record<string, unknown> : {}), notificationMuteUntil: muteUntil.toISOString() };
+    if (existing) await db.update(userPreferences).set({ preferences }).where(eq(userPreferences.id, existing.id));
+    else await db.insert(userPreferences).values({ userId: ctx.user.id, preferences });
+    return { muted: true, muteUntil };
+  }),
+  clearMute: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await database();
+    const [existing] = await db.select({ id: userPreferences.id, preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);
+    if (!existing) return { success: true };
+    const preferences = existing.preferences && typeof existing.preferences === "object" && !Array.isArray(existing.preferences) ? { ...(existing.preferences as Record<string, unknown>) } : {};
+    delete preferences.notificationMuteUntil;
+    await db.update(userPreferences).set({ preferences }).where(eq(userPreferences.id, existing.id));
     return { success: true };
   }),
 });

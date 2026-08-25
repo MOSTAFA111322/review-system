@@ -14,6 +14,7 @@ import {
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
 import { notifyTeamOverdueThresholds } from "./teamOverdueAlerts";
+import { findMutedUserIds } from "./notificationPreferences";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORTS_VIEW_PERMISSION = "reports.view";
@@ -30,6 +31,8 @@ function formatDate(value: Date) {
 type NotificationEntry = {
   userId: number;
   type: string;
+  importance: "normal" | "warning" | "critical";
+  teamName?: string | null;
   title: string;
   body: string;
   link: string;
@@ -45,13 +48,14 @@ async function createUnreadNotifications(
     new Map(entries.map(entry => [`${entry.userId}:${entry.type}:${entry.body}`, entry])).values(),
   );
   const userIds = Array.from(new Set(uniqueEntries.map(entry => entry.userId)));
+  const mutedUserIds = await findMutedUserIds(db, userIds);
   const types = Array.from(new Set(uniqueEntries.map(entry => entry.type)));
   const existing = await db
     .select({ userId: notifications.userId, type: notifications.type, body: notifications.body })
     .from(notifications)
     .where(and(inArray(notifications.userId, userIds), inArray(notifications.type, types), isNull(notifications.readAt)));
   const existingKeys = new Set(existing.map(row => `${row.userId}:${row.type}:${row.body}`));
-  const pending = uniqueEntries.filter(entry => !existingKeys.has(`${entry.userId}:${entry.type}:${entry.body}`));
+  const pending = uniqueEntries.filter(entry => !mutedUserIds.has(entry.userId) && !existingKeys.has(`${entry.userId}:${entry.type}:${entry.body}`));
   if (pending.length === 0) return 0;
   await db.insert(notifications).values(pending);
   return pending.length;
@@ -101,6 +105,7 @@ async function sendWeeklyManagerReport(db: NonNullable<Awaited<ReturnType<typeof
     managerIds.map(managerId => ({
       userId: managerId,
       type: "daily_task.weekly_report",
+      importance: "normal",
       title: "التقرير الأسبوعي للمهام اليومية",
       body,
       link: "/reports",
@@ -153,6 +158,7 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
       entries.push({
         userId: task.employeeUserId,
         type: "daily_task.overdue",
+        importance: "warning",
         title: "مهمة يومية متأخرة",
         body: `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — يلزم المتابعة`,
         link: "/daily-tasks",
@@ -163,6 +169,7 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
       entries.push({
         userId: task.employeeUserId,
         type: "daily_task.unupdated",
+        importance: "warning",
         title: "مهمة يومية غير محدثة",
         body: `المهمة #${task.id} — ${task.title} — تاريخها ${formatDate(task.taskDate)} — لم تُحدّث منذ أكثر من يوم`,
         link: "/daily-tasks",

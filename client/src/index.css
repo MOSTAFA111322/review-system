@@ -149,6 +149,18 @@
   }
 }
 
+@media print {
+  .print-exclude,
+  [data-sidebar],
+  header {
+    display: none !important;
+  }
+
+  .weekly-compliance-print {
+    max-width: none !important;
+  }
+}
+
 @layer components {
   /**
    * Custom container utility that centers content and adds responsive padding.

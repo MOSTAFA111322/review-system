@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYears, operationTypes, reviewerStatuses, reviews } from "../../drizzle/schema";
+import { dashboardAlertSettings, dashboardTeamAlertSettings, dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYears, operationTypes, reviewerStatuses, reviews } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -55,6 +55,64 @@ const taskListInput = z.object({
   endDate: dateText.optional(),
   status: status.optional(),
 }).refine(value => !value.startDate || !value.endDate || value.endDate >= value.startDate, { message: "نطاق التاريخ غير صحيح." });
+
+const weeklyTeamComplianceInput = z.object({
+  fiscalYearId: z.number().int().positive(),
+  weekStart: dateText.optional(),
+});
+
+type WeeklyTaskRow = { teamName: string | null; taskDate: Date; status: "pending" | "in_progress" | "completed" | "skipped"; notes: string | null };
+
+/** تجميع نقي قابل للاختبار؛ الفريق هو قسم الموظف النشط عند تنفيذ الاستعلام. */
+export function buildWeeklyTeamCompliance(rows: WeeklyTaskRow[], defaultThreshold: number, thresholdsByTeam: Array<{ teamName: string; overdueThreshold: number }>, referenceDate: Date) {
+  const today = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth(), referenceDate.getUTCDate()));
+  const thresholdByTeam = new Map(thresholdsByTeam.map(setting => [setting.teamName, setting.overdueThreshold]));
+  const grouped = new Map<string, { teamName: string; total: number; completed: number; overdue: number; unupdated: number }>();
+  for (const row of rows) {
+    const teamName = row.teamName?.trim() || "بدون فريق";
+    const current = grouped.get(teamName) ?? { teamName, total: 0, completed: 0, overdue: 0, unupdated: 0 };
+    current.total += 1;
+    if (row.status === "completed") current.completed += 1;
+    if (row.status !== "completed" && row.status !== "skipped" && new Date(row.taskDate).getTime() < today.getTime()) current.overdue += 1;
+    if (row.status !== "completed" && !row.notes?.trim()) current.unupdated += 1;
+    grouped.set(teamName, current);
+  }
+  return Array.from(grouped.values())
+    .map(row => {
+      const threshold = thresholdByTeam.get(row.teamName) ?? defaultThreshold;
+      return { ...row, completionRate: row.total ? Math.round((row.completed / row.total) * 100) : 0, threshold, exceedsThreshold: row.overdue >= threshold };
+    })
+    .sort((a, b) => Number(b.exceedsThreshold) - Number(a.exceedsThreshold) || b.overdue - a.overdue || b.unupdated - a.unupdated || a.teamName.localeCompare(b.teamName, "ar"));
+}
+
+async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePermission>[0], input: z.infer<typeof weeklyTeamComplianceInput>) {
+  await requireFiscalYearAccess(user, input.fiscalYearId);
+  const db = await database();
+  const [fiscalYear] = await db.select({ startDate: fiscalYears.startDate, endDate: fiscalYears.endDate }).from(fiscalYears).where(eq(fiscalYears.id, input.fiscalYearId)).limit(1);
+  if (!fiscalYear) throw new TRPCError({ code: "NOT_FOUND", message: "السنة المالية غير موجودة." });
+  const fiscalStart = new Date(`${new Date(fiscalYear.startDate).toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const fiscalEndExclusive = new Date(`${new Date(fiscalYear.endDate).toISOString().slice(0, 10)}T00:00:00.000Z`);
+  fiscalEndExclusive.setUTCDate(fiscalEndExclusive.getUTCDate() + 1);
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const endExclusive = new Date(Math.min(today.getTime() + 24 * 60 * 60 * 1000, fiscalEndExclusive.getTime()));
+  const requestedStart = input.weekStart ? new Date(`${input.weekStart}T00:00:00.000Z`) : new Date(endExclusive.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const weekStart = new Date(Math.max(fiscalStart.getTime(), requestedStart.getTime()));
+  if (weekStart.getTime() >= endExclusive.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية الأسبوع يجب أن تقع ضمن نطاق السنة المالية المنقضي." });
+  const [rows, globalSettings, teamSettings] = await Promise.all([
+    db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, weekStart), lt(dailyTasks.taskDate, endExclusive))),
+    db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1),
+    db.select({ teamName: dashboardTeamAlertSettings.teamName, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold }).from(dashboardTeamAlertSettings),
+  ]);
+  const teams = buildWeeklyTeamCompliance(rows, globalSettings[0]?.overdueThreshold ?? 3, teamSettings, now);
+  return {
+    fiscalYearId: input.fiscalYearId,
+    weekStart: weekStart.toISOString().slice(0, 10),
+    weekEnd: new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    summary: teams.reduce((summary, team) => ({ total: summary.total + team.total, completed: summary.completed + team.completed, overdue: summary.overdue + team.overdue, unupdated: summary.unupdated + team.unupdated, teamsAtRisk: summary.teamsAtRisk + Number(team.exceedsThreshold) }), { total: 0, completed: 0, overdue: 0, unupdated: 0, teamsAtRisk: 0 }),
+    teams,
+  };
+}
 
 export const dailyTasksRouter = router({
   employees: protectedProcedure.query(async ({ ctx }) => {
@@ -202,6 +260,18 @@ export const dailyTasksRouter = router({
     const grouped = new Map<number, { employeeId: number; employeeName: string; total: number; completed: number; overdue: number; unupdated: number }>();
     for (const row of rows) { const current = grouped.get(row.employeeId) ?? { employeeId: row.employeeId, employeeName: row.employeeName, total: 0, completed: 0, overdue: 0, unupdated: 0 }; current.total += 1; if (row.status === "completed") current.completed += 1; if (row.status !== "completed" && row.status !== "skipped" && new Date(row.taskDate).getTime() < today.getTime()) current.overdue += 1; if (row.status !== "completed" && !row.notes?.trim()) current.unupdated += 1; grouped.set(row.employeeId, current); }
     return { ...summary, completionRate: summary.total ? Math.round((summary.completed / summary.total) * 100) : 0, byEmployee: Array.from(grouped.values()).sort((a, b) => b.overdue - a.overdue || a.employeeName.localeCompare(b.employeeName, "ar")) };
+  }),
+
+  weeklyTeamCompliance: protectedProcedure.input(weeklyTeamComplianceInput).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REPORTS_VIEW);
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
+    return getWeeklyTeamComplianceReport(ctx.user, input);
+  }),
+
+  weeklyTeamComplianceExport: protectedProcedure.input(weeklyTeamComplianceInput).query(async ({ ctx, input }) => {
+    await requirePermission(ctx.user, PERMISSIONS.REPORTS_EXPORT);
+    await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
+    return getWeeklyTeamComplianceReport(ctx.user, input);
   }),
 
   unifiedReport: protectedProcedure.input(taskListInput).query(async ({ ctx, input }) => {

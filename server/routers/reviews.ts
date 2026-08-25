@@ -7,6 +7,7 @@ import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { completedAtForTransition } from "../reviewRules";
 import { protectedProcedure, router } from "../_core/trpc";
+import { findMutedUserIds } from "../notificationPreferences";
 
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const priority = z.enum(["normal", "urgent", "critical"]);
@@ -82,7 +83,8 @@ async function notifyAssignedEmployee(reviewId: number, internalRef: string, tit
   const db = await database();
   const [employee] = await db.select({ userId: employees.userId }).from(employees).where(eq(employees.id, employeeId)).limit(1);
   if (!employee?.userId || employee.userId === actorUserId) return;
-  await db.insert(notifications).values({ userId: employee.userId, type: "review.assigned", title: "تم تكليفك بمراجعة", body: `${internalRef} — ${title}`, link: `/reviews/${reviewId}` });
+  if ((await findMutedUserIds(db, [employee.userId])).has(employee.userId)) return;
+  await db.insert(notifications).values({ userId: employee.userId, type: "review.assigned", importance: "normal", title: "تم تكليفك بمراجعة", body: `${internalRef} — ${title}`, link: `/reviews/${reviewId}` });
 }
 
 export const reviewListInput = z.object({

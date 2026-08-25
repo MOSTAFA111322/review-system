@@ -56,9 +56,10 @@ function DecisionCard({ title, value, description, icon: Icon, tone, onClick }: 
 
 function DelayAlert({ data, onOpen: _onOpen }: { data: OperationalIndicators; onOpen: () => void }) {
   const alertSettings = trpc.settings.dashboardAlerts.get.useQuery();
+  const muteStatus = trpc.notifications.muteStatus.useQuery();
   const [, setLocation] = useLocation();
   const alert = getDailyDelayAlert(data.overdue, data.unupdated, alertSettings.data?.overdueThreshold);
-  if (alert.tone === "clear") return null;
+  if (alert.tone === "clear" || muteStatus.data?.muted) return null;
   const escalating = alert.tone === "escalate";
   return <section role="alert" aria-live="polite" className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between ${escalating ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/80 dark:bg-red-950/50 dark:text-red-100" : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/80 dark:bg-amber-950/45 dark:text-amber-100"}`}><div className="flex items-start gap-3"><span className={`rounded-xl p-2.5 ${escalating ? "bg-red-600 text-white" : "bg-amber-500 text-white"}`}><AlertTriangle className="h-5 w-5" /></span><div><p className="font-bold">{alert.title}</p><p className="mt-1 text-sm leading-6 opacity-85">{alert.description} راجع قائمة المهام ودوّن سبب التأخير أو حدّث الحالة.</p></div></div><button type="button" onClick={() => setLocation("/daily-tasks?view=overdue")} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${escalating ? "bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-600 dark:bg-red-500 dark:hover:bg-red-400" : "bg-amber-600 text-white hover:bg-amber-700 focus-visible:ring-amber-500 dark:bg-amber-500 dark:hover:bg-amber-400"}`}>فتح المهام المتأخرة</button></section>;
 }

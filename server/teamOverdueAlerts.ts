@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm";
 import { dashboardAlertSettings, dashboardTeamAlertSettings, dailyTasks, employees, notifications, users } from "../drizzle/schema";
 import { getDb } from "./db";
+import { findMutedUserIds } from "./notificationPreferences";
 
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
@@ -45,6 +46,8 @@ export async function notifyTeamOverdueThresholds(db: Database, fiscalYearId: nu
   const entries = recipients.map(recipient => ({
     userId: recipient.userId,
     type: "daily_task.team_threshold",
+    importance: "critical" as const,
+    teamName: recipient.teamName,
     title: "تنبيه تأخر مهام الفريق",
     body: `فريق ${recipient.teamName} تجاوز عتبة المهام اليومية المتأخرة (${recipient.threshold}). افتح القائمة لمراجعة التفاصيل.`,
     link: "/daily-tasks?view=overdue",
@@ -52,9 +55,10 @@ export async function notifyTeamOverdueThresholds(db: Database, fiscalYearId: nu
   if (entries.length === 0) return { created: 0, affectedTeams: 0 };
 
   const userIds = Array.from(new Set(entries.map(entry => entry.userId)));
+  const mutedUserIds = await findMutedUserIds(db, userIds, referenceDate);
   const existing = await db.select({ userId: notifications.userId, body: notifications.body }).from(notifications).where(and(inArray(notifications.userId, userIds), eq(notifications.type, "daily_task.team_threshold"), isNull(notifications.readAt), gte(notifications.createdAt, today)));
   const existingKeys = new Set(existing.map(entry => `${entry.userId}:${entry.body ?? ""}`));
-  const pending = entries.filter(entry => !existingKeys.has(`${entry.userId}:${entry.body}`));
+  const pending = entries.filter(entry => !mutedUserIds.has(entry.userId) && !existingKeys.has(`${entry.userId}:${entry.body}`));
   if (pending.length === 0) return { created: 0, affectedTeams: overdueByTeam.size };
   await db.insert(notifications).values(pending);
   return { created: pending.length, affectedTeams: new Set(pending.map(entry => entry.body)).size };

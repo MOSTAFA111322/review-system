@@ -17,6 +17,8 @@ import Settings from "./pages/Settings";
 import Users from "./pages/Users";
 import Login from "./pages/Login";
 import RentFollowUps from "./pages/RentFollowUps";
+import Notifications from "./pages/Notifications";
+import WeeklyTeamCompliance from "./pages/WeeklyTeamCompliance";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -27,6 +29,8 @@ function Router() {
       <Route path="/reviews/:id" component={ReviewDetail} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/reports" component={Reports} />
+      <Route path="/notifications" component={Notifications} />
+      <Route path="/reports/team-compliance" component={WeeklyTeamCompliance} />
       <Route path="/my-tasks" component={MyTasks} />
       <Route path="/daily-tasks" component={DailyTasks} />
       <Route path="/rent-follow-ups" component={RentFollowUps} />

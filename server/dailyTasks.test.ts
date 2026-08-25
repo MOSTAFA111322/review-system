@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { dailyTasksRouter, matchesRecurrence } from "./routers/dailyTasks";
+import { buildWeeklyTeamCompliance, dailyTasksRouter, matchesRecurrence } from "./routers/dailyTasks";
 
 describe("daily tasks import contract", () => {
   it("يسجل إجراءات الموظفين والاستيراد والتقرير الموحد", () => {
@@ -9,6 +9,8 @@ describe("daily tasks import contract", () => {
     expect(procedures.importBatch).toBeDefined();
     expect(procedures.unifiedReport).toBeDefined();
     expect(procedures.operationalIndicators).toBeDefined();
+    expect(procedures.weeklyTeamCompliance).toBeDefined();
+    expect(procedures.weeklyTeamComplianceExport).toBeDefined();
   });
 
   it("يحمي الاستيراد بصلاحية الإدارة والعزل المالي ويتحقق من الموظفين والتكرار", () => {
@@ -66,5 +68,25 @@ describe("daily tasks import contract", () => {
     expect(reportSection).toContain("requireFiscalYearAccess(ctx.user, input.fiscalYearId)");
     expect(reportSection).toContain("reviews.fiscalYearId");
   });
-});
 
+  it("يجمع التزام الفرق بصورة آمنة ويطبق العتبة الخاصة ثم العامة", () => {
+    const teams = buildWeeklyTeamCompliance([
+      { teamName: "المراجعة", taskDate: new Date("2026-08-23T00:00:00Z"), status: "pending", notes: null },
+      { teamName: "المراجعة", taskDate: new Date("2026-08-24T00:00:00Z"), status: "completed", notes: "تم" },
+      { teamName: null, taskDate: new Date("2026-08-25T00:00:00Z"), status: "in_progress", notes: "قيد المتابعة" },
+    ], 2, [{ teamName: "المراجعة", overdueThreshold: 1 }], new Date("2026-08-25T09:00:00Z"));
+    expect(teams).toEqual(expect.arrayContaining([
+      expect.objectContaining({ teamName: "المراجعة", total: 2, completed: 1, overdue: 1, unupdated: 1, completionRate: 50, threshold: 1, exceedsThreshold: true }),
+      expect.objectContaining({ teamName: "بدون فريق", total: 1, completed: 0, overdue: 0, unupdated: 0, threshold: 2, exceedsThreshold: false }),
+    ]));
+  });
+
+  it("يحمي تقرير الفرق بالتصريح الإداري وعزل السنة وصلاحية التصدير", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    const reportSection = source.slice(source.indexOf("weeklyTeamCompliance:"), source.indexOf("unifiedReport:"));
+    expect(reportSection).toContain("PERMISSIONS.REPORTS_VIEW");
+    expect(reportSection).toContain("PERMISSIONS.REPORTS_EXPORT");
+    expect(reportSection).toContain("PERMISSIONS.DAILY_TASKS_MANAGE");
+    expect(source).toContain("await requireFiscalYearAccess(user, input.fiscalYearId)");
+  });
+});

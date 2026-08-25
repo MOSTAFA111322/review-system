@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const reportsSource = readFileSync(path.resolve(process.cwd(), "client/src/pages/Reports.tsx"), "utf8");
 const stylesSource = readFileSync(path.resolve(process.cwd(), "client/src/index.css"), "utf8");
+const weeklyComplianceSource = readFileSync(path.resolve(process.cwd(), "client/src/pages/WeeklyTeamCompliance.tsx"), "utf8");
 
 describe("واجهة تصدير التقرير الأسبوعي", () => {
   it("تعرض زرًا مستقلًا للتقرير الأسبوعي مع حالة تحميل وإيقاف عند غياب البيانات", () => {
@@ -61,6 +62,23 @@ describe("عزل إعدادات التقارير عن الطباعة", () => {
   });
 });
 
+
+describe("تقرير التزام الفرق الأسبوعي", () => {
+  it("يعرض نطاق الأسبوع وملخص الالتزام والجدول التفصيلي من عقد tRPC", () => {
+    expect(weeklyComplianceSource).toContain("trpc.dailyTasks.weeklyTeamCompliance.useQuery");
+    expect(weeklyComplianceSource).toContain("تقرير التزام الفرق الأسبوعي");
+    expect(weeklyComplianceSource).toContain("فرق تجاوزت العتبة");
+    expect(weeklyComplianceSource).toContain("لا يعرض أسماء الموظفين");
+  });
+
+  it("يربط CSV وExcel والطباعة بنتيجة التصدير الخادمية فقط", () => {
+    expect(weeklyComplianceSource).toContain("trpc.dailyTasks.weeklyTeamComplianceExport.useQuery");
+    expect(weeklyComplianceSource).toContain("exported.refetch()");
+    expect(weeklyComplianceSource).toContain("التزام-الفرق-");
+    expect(weeklyComplianceSource).toContain("window.print()");
+    expect(stylesSource).toContain(".weekly-compliance-print");
+  });
+});
 
 describe("تصدير سجل التدقيق الإداري", () => {
   it("يعرض بطاقة تصدير آمنة مع فلاتر الفترة والمنفذ والإجراء", () => {
