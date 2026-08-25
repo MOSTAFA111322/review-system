@@ -1,10 +1,11 @@
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { dashboardAlertSettings, employeeStatuses, operationTypes, permissions, reviewerStatuses, statusTransitions } from "../../drizzle/schema";
+import { dashboardAlertSettings, dashboardAlertSettingsActivity, dashboardTeamAlertSettings, employees, employeeStatuses, fiscalYears, operationTypes, permissions, reviewerStatuses, statusTransitions, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requirePermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
+import { notifyTeamOverdueThresholds } from "../teamOverdueAlerts";
 
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#64748b");
 const sortOrder = z.number().int().min(0).max(10000).default(0);
@@ -155,12 +156,46 @@ const dashboardAlertsRouter = router({
     const [settings] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
     return { overdueThreshold: settings?.overdueThreshold ?? 3 };
   }),
+  manageOverview: protectedProcedure.query(async ({ ctx }) => {
+    await requireSettingsPermission(ctx.user);
+    const db = await database();
+    const [global] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const [teams, history] = await Promise.all([
+      db.select({ teamName: employees.department }).from(employees).where(and(eq(employees.isActive, true), isNotNull(employees.department))).groupBy(employees.department).orderBy(asc(employees.department)),
+      db.select({ id: dashboardAlertSettingsActivity.id, scope: dashboardAlertSettingsActivity.scope, teamName: dashboardAlertSettingsActivity.teamName, previousThreshold: dashboardAlertSettingsActivity.previousThreshold, nextThreshold: dashboardAlertSettingsActivity.nextThreshold, createdAt: dashboardAlertSettingsActivity.createdAt, actorName: users.name, actorUsername: users.username }).from(dashboardAlertSettingsActivity).leftJoin(users, eq(dashboardAlertSettingsActivity.actorUserId, users.id)).orderBy(desc(dashboardAlertSettingsActivity.createdAt)).limit(12),
+    ]);
+    const teamSettings = await db.select({ teamName: dashboardTeamAlertSettings.teamName, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold, updatedAt: dashboardTeamAlertSettings.updatedAt }).from(dashboardTeamAlertSettings).orderBy(asc(dashboardTeamAlertSettings.teamName));
+    return { globalThreshold: global?.overdueThreshold ?? 3, teams: teams.flatMap(team => team.teamName ? [team.teamName] : []), teamSettings, history };
+  }),
   update: protectedProcedure.input(z.object({ overdueThreshold: z.number().int().min(1).max(1000) })).mutation(async ({ ctx, input }) => {
     await requireSettingsPermission(ctx.user);
     const db = await database();
-    const [current] = await db.select({ id: dashboardAlertSettings.id }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const [current] = await db.select({ id: dashboardAlertSettings.id, overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const previousThreshold = current?.overdueThreshold ?? 3;
     if (current) await db.update(dashboardAlertSettings).set({ overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id }).where(eq(dashboardAlertSettings.id, 1));
     else await db.insert(dashboardAlertSettings).values({ id: 1, overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id });
+    if (previousThreshold !== input.overdueThreshold) {
+      await db.insert(dashboardAlertSettingsActivity).values({ scope: "global", previousThreshold, nextThreshold: input.overdueThreshold, actorUserId: ctx.user.id });
+      const currentFiscalYears = await db.select({ id: fiscalYears.id }).from(fiscalYears).where(eq(fiscalYears.isCurrent, true));
+      await Promise.all(currentFiscalYears.map(fiscalYear => notifyTeamOverdueThresholds(db, fiscalYear.id)));
+    }
+    return { success: true };
+  }),
+  updateTeam: protectedProcedure.input(z.object({ teamName: z.string().trim().min(2).max(160), overdueThreshold: z.number().int().min(1).max(1000) })).mutation(async ({ ctx, input }) => {
+    await requireSettingsPermission(ctx.user);
+    const db = await database();
+    const [team] = await db.select({ teamName: employees.department }).from(employees).where(and(eq(employees.isActive, true), eq(employees.department, input.teamName))).limit(1);
+    if (!team?.teamName) throw new TRPCError({ code: "BAD_REQUEST", message: "فريق العمل المحدد غير موجود ضمن الموظفين النشطين." });
+    const [global] = await db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1);
+    const [current] = await db.select({ id: dashboardTeamAlertSettings.id, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold }).from(dashboardTeamAlertSettings).where(eq(dashboardTeamAlertSettings.teamName, input.teamName)).limit(1);
+    const previousThreshold = current?.overdueThreshold ?? global?.overdueThreshold ?? 3;
+    if (current) await db.update(dashboardTeamAlertSettings).set({ overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id }).where(eq(dashboardTeamAlertSettings.id, current.id));
+    else await db.insert(dashboardTeamAlertSettings).values({ teamName: input.teamName, overdueThreshold: input.overdueThreshold, updatedByUserId: ctx.user.id });
+    if (previousThreshold !== input.overdueThreshold) {
+      await db.insert(dashboardAlertSettingsActivity).values({ scope: "team", teamName: input.teamName, previousThreshold, nextThreshold: input.overdueThreshold, actorUserId: ctx.user.id });
+      const currentFiscalYears = await db.select({ id: fiscalYears.id }).from(fiscalYears).where(eq(fiscalYears.isCurrent, true));
+      await Promise.all(currentFiscalYears.map(fiscalYear => notifyTeamOverdueThresholds(db, fiscalYear.id)));
+    }
     return { success: true };
   }),
 });

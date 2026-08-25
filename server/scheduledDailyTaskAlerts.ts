@@ -13,6 +13,7 @@ import {
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
+import { notifyTeamOverdueThresholds } from "./teamOverdueAlerts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REPORTS_VIEW_PERMISSION = "reports.view";
@@ -168,6 +169,7 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
       });
     }
     const created = await createUnreadNotifications(db, entries);
+    const teamThresholdAlerts = await notifyTeamOverdueThresholds(db, fiscalYear.id, today);
 
     let weeklyReport = null;
     if (today.getUTCDay() === 6) {
@@ -175,7 +177,7 @@ export async function handleDailyTaskAlerts(req: Request, res: Response) {
       weeklyReport = await sendWeeklyManagerReport(db, fiscalYear.id, weekStart, today);
     }
 
-    return res.json({ ok: true, fiscalYearId: fiscalYear.id, overdue: overdue.length, unupdated: unupdated.length, created, weeklyReport, timestamp });
+    return res.json({ ok: true, fiscalYearId: fiscalYear.id, overdue: overdue.length, unupdated: unupdated.length, created, teamThresholdAlerts, weeklyReport, timestamp });
   } catch (error) {
     return res.status(500).json({
       error: error instanceof Error ? error.message : "scheduled-alert-failed",

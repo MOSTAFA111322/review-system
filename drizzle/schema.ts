@@ -590,6 +590,34 @@ export const dashboardAlertSettings = mysqlTable("dashboard_alert_settings", {
   ...auditTimestamps,
 });
 
+/** عتبات التأخر الخاصة بالفرق؛ الفريق هو القسم التشغيلي المعرّف في دليل الموظفين. */
+export const dashboardTeamAlertSettings = mysqlTable(
+  "dashboard_team_alert_settings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    teamName: varchar("teamName", { length: 160 }).notNull(),
+    overdueThreshold: int("overdueThreshold").notNull(),
+    updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+    ...auditTimestamps,
+  },
+  table => [uniqueIndex("dashboard_team_alert_settings_team_unique").on(table.teamName)],
+);
+
+/** سجل مستقل وقابل للتدقيق لأي تغيير في العتبة العامة أو عتبة فريق. */
+export const dashboardAlertSettingsActivity = mysqlTable(
+  "dashboard_alert_settings_activity",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    scope: mysqlEnum("scope", ["global", "team"]).notNull(),
+    teamName: varchar("teamName", { length: 160 }),
+    previousThreshold: int("previousThreshold").notNull(),
+    nextThreshold: int("nextThreshold").notNull(),
+    actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [index("dashboard_alert_activity_created_idx").on(table.createdAt), index("dashboard_alert_activity_team_idx").on(table.teamName, table.createdAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type FiscalYear = typeof fiscalYears.$inferSelect;

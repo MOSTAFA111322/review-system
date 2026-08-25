@@ -5,6 +5,7 @@ import { dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYear
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
+import { notifyTeamOverdueThresholds } from "../teamOverdueAlerts";
 
 const dateText = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "التاريخ يجب أن يكون بصيغة YYYY-MM-DD.");
 const priority = z.enum(["normal", "urgent", "critical"]);
@@ -133,6 +134,7 @@ export const dailyTasksRouter = router({
       if (review.assignedEmployeeId !== input.employeeId) throw new TRPCError({ code: "BAD_REQUEST", message: "الموظف المحدد ليس الموظف المكلف بالمراجعة." });
     }
     const [result] = await db.insert(dailyTasks).values({ fiscalYearId: input.fiscalYearId, employeeId: input.employeeId, reviewId: input.reviewId ?? null, title: input.title, description: input.description, notes: input.notes, taskDate: new Date(`${input.taskDate}T00:00:00.000Z`), dueTime: input.dueTime, priority: input.priority, source: input.reviewId ? "review" : "manual", createdByUserId: ctx.user.id });
+    await notifyTeamOverdueThresholds(db, input.fiscalYearId);
     return { id: Number(result.insertId) };
   }),
 
@@ -161,6 +163,7 @@ export const dailyTasksRouter = router({
     const repeatedRows = input.rows.filter(row => existingKeys.has(normalizeKey(row.employeeId, row.taskDate, row.title)));
     if (repeatedRows.length > 0) throw new TRPCError({ code: "CONFLICT", message: `يوجد ${repeatedRows.length} من المهام موجودة مسبقًا. لم يتم استيراد أي صف لتجنب التكرار.` });
     await db.insert(dailyTasks).values(input.rows.map(row => ({ ...row, fiscalYearId: input.fiscalYearId, taskDate: new Date(`${row.taskDate}T00:00:00.000Z`), source: "imported" as const, createdByUserId: ctx.user.id })));
+    await notifyTeamOverdueThresholds(db, input.fiscalYearId);
     return { imported: input.rows.length };
   }),
 
@@ -176,6 +179,7 @@ export const dailyTasksRouter = router({
       if (!employee || employee.id !== task.employeeId) throw new TRPCError({ code: "FORBIDDEN", message: "لا يمكنك تحديث مهمة موظف آخر." });
     }
     await db.update(dailyTasks).set({ status: input.status, notes: input.notes, completedAt: input.status === "completed" ? new Date() : null, completedByUserId: input.status === "completed" ? ctx.user.id : null }).where(eq(dailyTasks.id, input.id));
+    await notifyTeamOverdueThresholds(db, task.fiscalYearId);
     return { success: true };
   }),
 
