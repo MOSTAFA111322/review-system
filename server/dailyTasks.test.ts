@@ -97,7 +97,7 @@ describe("daily tasks import contract", () => {
     expect(reportSection).toContain("completionRateDelta");
     expect(reportSection).toContain("overdueDelta");
     const uiSource = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
-    expect(uiSource).toContain("مقارنة الإنجاز بالأسبوع السابق");
+    expect(uiSource).toContain("مقارنة الإنجاز بـ{periodLabel} السابق");
     expect(uiSource).toContain("previousCompletionRate");
     expect(uiSource).toContain("فرق الإنجاز");
   });
@@ -125,5 +125,20 @@ describe("daily tasks import contract", () => {
     expect(complianceUi).toContain("onFocus");
     expect(complianceUi).toContain('role="tooltip"');
     expect(complianceUi).toContain("previousOverdue");
+  });
+
+  it("يحفظ فلاتر المهام كتفضيلات شخصية ويتيح مقارنة شهرية داخل السنة المالية", () => {
+    const preferences = readFileSync(new URL("./routers/dashboardPreferences.ts", import.meta.url), "utf8");
+    expect(preferences).toContain("dailyTaskFiltersInput");
+    expect(preferences).toContain("dailyTaskFilters: router");
+    expect(preferences).toContain("dailyTaskFilters: input");
+    const compliance = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    const reportSection = compliance.slice(compliance.indexOf("getWeeklyTeamComplianceReport"), compliance.indexOf("export const dailyTasksRouter"));
+    expect(reportSection).toContain('input.period === "month" ? 30 : 7');
+    expect(reportSection).toContain("periodDuration");
+    expect(reportSection).toContain("period: input.period");
+    const ui = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
+    expect(ui).toContain('useState<"week" | "month">("week")');
+    expect(ui).toContain("شهري — 30 يومًا");
   });
 });

@@ -29,4 +29,14 @@ describe("تفضيلات كتم الإشعارات", () => {
     expect(section).toContain("archivedAt: new Date()");
     expect(section).toContain("archivedAt: null");
   });
+
+  it("يدعم البحث النصي داخل الأرشيف الشخصي فقط", () => {
+    const source = readFileSync(new URL("./routers/extendedFeatures.ts", import.meta.url), "utf8");
+    const section = source.slice(source.indexOf("notificationsRouter"), source.indexOf("rentalsRouter"));
+    expect(section).toContain("search: z.string().trim().min(1).max(160).optional()");
+    expect(section).toContain("like(notifications.title");
+    expect(section).toContain("like(notifications.body");
+    expect(section).toContain("eq(notifications.userId, ctx.user.id)");
+    expect(section).toContain("archivedOnly");
+  });
 });

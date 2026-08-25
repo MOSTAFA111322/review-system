@@ -59,6 +59,7 @@ const taskListInput = z.object({
 const weeklyTeamComplianceInput = z.object({
   fiscalYearId: z.number().int().positive(),
   weekStart: dateText.optional(),
+  period: z.enum(["week", "month"]).default("week"),
 });
 
 type WeeklyTaskRow = { teamName: string | null; taskDate: Date; status: "pending" | "in_progress" | "completed" | "skipped"; notes: string | null };
@@ -96,7 +97,8 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const endExclusive = new Date(Math.min(today.getTime() + 24 * 60 * 60 * 1000, fiscalEndExclusive.getTime()));
-  const requestedStart = input.weekStart ? new Date(`${input.weekStart}T00:00:00.000Z`) : new Date(endExclusive.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const periodDays = input.period === "month" ? 30 : 7;
+  const requestedStart = input.weekStart ? new Date(`${input.weekStart}T00:00:00.000Z`) : new Date(endExclusive.getTime() - periodDays * 24 * 60 * 60 * 1000);
   const weekStart = new Date(Math.max(fiscalStart.getTime(), requestedStart.getTime()));
   if (weekStart.getTime() >= endExclusive.getTime()) throw new TRPCError({ code: "BAD_REQUEST", message: "بداية الأسبوع يجب أن تقع ضمن نطاق السنة المالية المنقضي." });
   const periodDuration = endExclusive.getTime() - weekStart.getTime();
@@ -114,6 +116,7 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   const previousByTeam = new Map(previousTeams.map(team => [team.teamName, team]));
   return {
     fiscalYearId: input.fiscalYearId,
+    period: input.period,
     weekStart: weekStart.toISOString().slice(0, 10),
     weekEnd: new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     previousWeekStart: hasPreviousPeriod ? previousWeekStart.toISOString().slice(0, 10) : null,

@@ -13,6 +13,14 @@ const dashboardPeriodInput = z.object({
 });
 
 const defaultPeriod = { preset: "fiscalYear" as const, customStartDate: undefined, customEndDate: undefined };
+const dailyTaskFiltersInput = z.object({
+  dateMode: z.enum(["today", "week", "custom"]),
+  customStartDate: dateText.optional(),
+  customEndDate: dateText.optional(),
+  statusFilter: z.enum(["pending", "in_progress", "completed", "skipped"]).optional(),
+  sourceFilter: z.enum(["all", "review", "recurring", "manual", "imported"]),
+});
+const defaultDailyTaskFilters = { dateMode: "today" as const, customStartDate: undefined, customEndDate: undefined, statusFilter: undefined, sourceFilter: "all" as const };
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -21,6 +29,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 function readDashboardPeriod(value: unknown) {
   const parsed = dashboardPeriodInput.safeParse(asRecord(value).dashboardPeriod);
   return parsed.success ? parsed.data : defaultPeriod;
+}
+
+function readDailyTaskFilters(value: unknown) {
+  const parsed = dailyTaskFiltersInput.safeParse(asRecord(value).dailyTaskFilters);
+  return parsed.success ? parsed.data : defaultDailyTaskFilters;
 }
 
 async function database() {
@@ -42,5 +55,20 @@ export const dashboardPreferencesRouter = router({
     if (existing) await db.update(userPreferences).set({ preferences }).where(eq(userPreferences.id, existing.id));
     else await db.insert(userPreferences).values({ userId: ctx.user.id, preferences });
     return input;
+  }),
+  dailyTaskFilters: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const db = await database();
+      const [row] = await db.select({ preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);
+      return readDailyTaskFilters(row?.preferences);
+    }),
+    save: protectedProcedure.input(dailyTaskFiltersInput).mutation(async ({ ctx, input }) => {
+      const db = await database();
+      const [existing] = await db.select({ id: userPreferences.id, preferences: userPreferences.preferences }).from(userPreferences).where(eq(userPreferences.userId, ctx.user.id)).limit(1);
+      const preferences = { ...asRecord(existing?.preferences), dailyTaskFilters: input };
+      if (existing) await db.update(userPreferences).set({ preferences }).where(eq(userPreferences.id, existing.id));
+      else await db.insert(userPreferences).values({ userId: ctx.user.id, preferences });
+      return input;
+    }),
   }),
 });

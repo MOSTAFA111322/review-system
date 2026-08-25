@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, like, lt, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { extname } from "node:path";
 import { z } from "zod";
@@ -266,6 +266,7 @@ export const notificationsRouter = router({
     importance: z.enum(["normal", "warning", "critical"]).optional(),
     teamName: z.string().trim().min(1).max(160).optional(),
     type: z.string().trim().min(1).max(64).optional(),
+    search: z.string().trim().min(1).max(160).optional(),
     limit: z.number().int().min(1).max(200).default(100),
   }).optional()).query(async ({ ctx, input }) => {
     const db = await database();
@@ -275,6 +276,11 @@ export const notificationsRouter = router({
     if (input?.importance) conditions.push(eq(notifications.importance, input.importance));
     if (input?.teamName) conditions.push(eq(notifications.teamName, input.teamName));
     if (input?.type) conditions.push(eq(notifications.type, input.type));
+    if (input?.search) {
+      const term = `%${input.search}%`;
+      const searchCondition = or(like(notifications.title, term), like(notifications.body, term), like(notifications.teamName, term));
+      if (searchCondition) conditions.push(searchCondition);
+    }
     return db.select().from(notifications).where(and(...conditions)).orderBy(desc(notifications.createdAt)).limit(input?.limit ?? 100);
   }),
   summary: protectedProcedure.query(async ({ ctx }) => {

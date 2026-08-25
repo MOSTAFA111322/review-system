@@ -66,7 +66,7 @@ describe("عزل إعدادات التقارير عن الطباعة", () => {
 describe("تقرير التزام الفرق الأسبوعي", () => {
   it("يعرض نطاق الأسبوع وملخص الالتزام والجدول التفصيلي من عقد tRPC", () => {
     expect(weeklyComplianceSource).toContain("trpc.dailyTasks.weeklyTeamCompliance.useQuery");
-    expect(weeklyComplianceSource).toContain("تقرير التزام الفرق الأسبوعي");
+    expect(weeklyComplianceSource).toContain("تقرير التزام الفرق {periodLabel}");
     expect(weeklyComplianceSource).toContain("فرق تجاوزت العتبة");
     expect(weeklyComplianceSource).toContain("لا يعرض أسماء الموظفين");
   });
