@@ -1,5 +1,5 @@
-import { and, eq, gte, inArray, isNull, lt } from "drizzle-orm";
-import { dashboardAlertSettings, dailyTasks, employees, fiscalYears, notifications, permissions, rolePermissions, userRoles, users } from "../drizzle/schema";
+import { and, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { dashboardAlertSettings, dailyTasks, employees, fiscalYears, notifications, permissions, rolePermissions, teamComplianceDeclineAlerts, userRoles, users } from "../drizzle/schema";
 import { getDb } from "./db";
 import { findMutedUserIds } from "./notificationPreferences";
 
@@ -38,8 +38,8 @@ export function buildComplianceDeclines(input: { current: Array<{ teamName: stri
 }
 
 /**
- * يفحص الشهر المنقضي الحالي بعد تغير المهمة ويرسل تنبيهًا واحدًا غير مقروء لكل مدير
- * مخول. الجسم ثابت للفريق وفترة التقرير حتى لا تتكرر التنبيهات مع أي تعديل لاحق.
+ * يفحص الشهر المنقضي الحالي بعد تغير المهمة، ويسجل حادثة واحدة لكل فريق وفترة ثم
+ * ينبه المديرين المخولين مرة واحدة عند إنشاء الحادثة. تبقى الحادثة مرجعًا للمتابعة.
  */
 export async function notifyTeamComplianceDeclines(db: Database, fiscalYearId: number, referenceDate = new Date()) {
   const [fiscalYear] = await db.select({ startDate: fiscalYears.startDate, endDate: fiscalYears.endDate }).from(fiscalYears).where(eq(fiscalYears.id, fiscalYearId)).limit(1);
@@ -64,6 +64,28 @@ export async function notifyTeamComplianceDeclines(db: Database, fiscalYearId: n
   const threshold = settings[0]?.complianceDeclineThreshold ?? 10;
   const declines = buildComplianceDeclines({ current: currentRows, previous: previousRows, threshold });
   if (!declines.length) return { created: 0, affectedTeams: 0 };
+  const periodStart = new Date(start);
+  const periodEnd = new Date(endExclusive.getTime() - 86_400_000);
+  const periodStartLabel = periodStart.toISOString().slice(0, 10);
+  const periodEndLabel = periodEnd.toISOString().slice(0, 10);
+  const existingIncidents = await db.select({ teamName: teamComplianceDeclineAlerts.teamName }).from(teamComplianceDeclineAlerts).where(and(
+    eq(teamComplianceDeclineAlerts.fiscalYearId, fiscalYearId),
+    eq(teamComplianceDeclineAlerts.periodStart, periodStart),
+    eq(teamComplianceDeclineAlerts.periodEnd, periodEnd),
+  ));
+  const knownTeams = new Set(existingIncidents.map(item => item.teamName));
+  const newDeclines = declines.filter(decline => !knownTeams.has(decline.teamName));
+  if (!newDeclines.length) return { created: 0, affectedTeams: declines.length };
+  await db.insert(teamComplianceDeclineAlerts).values(newDeclines.map(decline => ({
+    fiscalYearId,
+    teamName: decline.teamName,
+    periodStart,
+    periodEnd,
+    completionRate: decline.completionRate,
+    previousCompletionRate: decline.previousCompletionRate,
+    completionRateDelta: decline.completionRateDelta,
+    threshold,
+  }))).onDuplicateKeyUpdate({ set: { teamName: sql`${teamComplianceDeclineAlerts.teamName}` } });
   const permissionsByUser = new Map<number, { isAdmin: boolean; codes: Set<string> }>();
   for (const row of managerPermissionRows) {
     const current = permissionsByUser.get(row.userId) ?? { isAdmin: row.role === "admin", codes: new Set<string>() };
@@ -73,21 +95,17 @@ export async function notifyTeamComplianceDeclines(db: Database, fiscalYearId: n
   }
   const managerIds = Array.from(permissionsByUser.entries()).flatMap(([userId, access]) => access.isAdmin || (access.codes.has("reports.view") && access.codes.has("daily_tasks.manage")) ? [userId] : []);
   if (!managerIds.length) return { created: 0, affectedTeams: 0 };
-  const weekStart = start.toISOString().slice(0, 10);
-  const weekEnd = new Date(endExclusive.getTime() - 86_400_000).toISOString().slice(0, 10);
-  const entries = managerIds.flatMap(userId => declines.map(decline => ({
+  const entries = managerIds.flatMap(userId => newDeclines.map(decline => ({
     userId,
     type: "daily_task.team_compliance_decline",
     importance: "warning" as const,
     teamName: decline.teamName,
     title: "تراجع التزام الفريق الشهري",
-    body: `انخفض التزام فريق ${decline.teamName} ضمن الفترة ${weekStart} إلى ${weekEnd} بما يتجاوز العتبة المعتمدة. راجع تقرير التزام الفرق الشهري.`,
-    link: "/reports/team-compliance?period=month",
+    body: `انخفض التزام فريق ${decline.teamName} ضمن الفترة ${periodStartLabel} إلى ${periodEndLabel} بما يتجاوز العتبة المعتمدة. راجع سجل تنبيهات التراجع.`,
+    link: "/reports/decline-alerts",
   })));
   const mutedUserIds = await findMutedUserIds(db, managerIds, referenceDate);
-  const existing = await db.select({ userId: notifications.userId, body: notifications.body }).from(notifications).where(and(inArray(notifications.userId, managerIds), eq(notifications.type, "daily_task.team_compliance_decline"), isNull(notifications.readAt), gte(notifications.createdAt, start)));
-  const existingKeys = new Set(existing.map(entry => `${entry.userId}:${entry.body ?? ""}`));
-  const pending = entries.filter(entry => !mutedUserIds.has(entry.userId) && !existingKeys.has(`${entry.userId}:${entry.body}`));
+  const pending = entries.filter(entry => !mutedUserIds.has(entry.userId));
   if (!pending.length) return { created: 0, affectedTeams: declines.length };
   await db.insert(notifications).values(pending);
   return { created: pending.length, affectedTeams: declines.length };

@@ -18,5 +18,6 @@ export default defineConfig({
     // Live integration tests share a remote database; prevent cross-file connection contention.
     fileParallelism: false,
     maxWorkers: 1,
+    globalTeardown: "./server/test.global-teardown.ts",
   },
 });

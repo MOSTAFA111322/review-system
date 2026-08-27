@@ -169,4 +169,30 @@ describe("daily tasks import contract", () => {
     expect(settings).toContain("dashboardComplianceDeclineSettingsActivity");
     expect(settings).toContain("PERMISSIONS.SETTINGS_MANAGE");
   });
+
+  it("يوفر سجل تراجع محميًا وإقرارًا إداريًا موثقًا وتصفية فريق متصلة بالتقرير والتصدير", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    expect(source).toContain("complianceDeclineAlerts:");
+    expect(source).toContain("list: protectedProcedure.input");
+    expect(source).toContain("acknowledge: protectedProcedure.input");
+    expect(source).toContain("requireComplianceAlertManager(ctx.user, input.fiscalYearId)");
+    expect(source).toContain("requireComplianceAlertManager(ctx.user, alert.fiscalYearId, true)");
+    expect(source).toContain("acknowledgedByUserId");
+    expect(source).toContain("acknowledgedAt");
+    expect(source).toContain("acknowledgementNote");
+    expect(source).toContain("teamName: z.string().trim().min(1).max(160).optional()");
+    expect(source).toContain("eq(employees.department, input.teamName)");
+    expect(source).toContain("requireFiscalYearAccess(ctx.user, input.fiscalYearId, true)");
+
+    const reportUi = readFileSync(new URL("../client/src/pages/WeeklyTeamCompliance.tsx", import.meta.url), "utf8");
+    expect(reportUi).toContain("const [teamName, setTeamName]");
+    expect(reportUi).toContain('label="فريق العمل"');
+    expect(reportUi).toContain("...(teamName ? { teamName } : {})");
+
+    const alertUi = readFileSync(new URL("../client/src/pages/ComplianceDeclineAlerts.tsx", import.meta.url), "utf8");
+    expect(alertUi).toContain("تأكيد الاستلام");
+    expect(alertUi).toContain("ملاحظة متابعة سريعة");
+    expect(alertUi).toContain("trpc.dailyTasks.complianceDeclineAlerts.list.useQuery");
+    expect(alertUi).toContain("trpc.dailyTasks.complianceDeclineAlerts.acknowledge.useMutation");
+  });
 });

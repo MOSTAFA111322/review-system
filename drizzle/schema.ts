@@ -644,6 +644,33 @@ export const dashboardComplianceDeclineSettingsActivity = mysqlTable(
   table => [index("dashboard_compliance_decline_activity_created_idx").on(table.createdAt)],
 );
 
+/** حادثة تراجع فعلية قابلة للمتابعة والإقرار الإداري؛ لا تُحذف الإشعارات العامة عند تحديثها. */
+export const teamComplianceDeclineAlerts = mysqlTable(
+  "team_compliance_decline_alerts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fiscalYearId: int("fiscalYearId").notNull().references(() => fiscalYears.id, { onDelete: "cascade" }),
+    teamName: varchar("teamName", { length: 160 }).notNull(),
+    periodStart: date("periodStart").notNull(),
+    periodEnd: date("periodEnd").notNull(),
+    completionRate: int("completionRate").notNull(),
+    previousCompletionRate: int("previousCompletionRate").notNull(),
+    completionRateDelta: int("completionRateDelta").notNull(),
+    threshold: int("threshold").notNull(),
+    status: mysqlEnum("status", ["new", "acknowledged"]).default("new").notNull(),
+    acknowledgementNote: text("acknowledgementNote"),
+    acknowledgedByUserId: int("acknowledgedByUserId").references(() => users.id, { onDelete: "set null" }),
+    acknowledgedAt: timestamp("acknowledgedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("team_compliance_decline_alert_window_unique").on(table.fiscalYearId, table.teamName, table.periodStart, table.periodEnd),
+    index("team_compliance_decline_alert_fiscal_created_idx").on(table.fiscalYearId, table.createdAt),
+    index("team_compliance_decline_alert_status_idx").on(table.status, table.createdAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type FiscalYear = typeof fiscalYears.$inferSelect;

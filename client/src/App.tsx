@@ -19,6 +19,7 @@ import Login from "./pages/Login";
 import RentFollowUps from "./pages/RentFollowUps";
 import Notifications from "./pages/Notifications";
 import WeeklyTeamCompliance from "./pages/WeeklyTeamCompliance";
+import ComplianceDeclineAlerts from "./pages/ComplianceDeclineAlerts";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/reports" component={Reports} />
       <Route path="/notifications" component={Notifications} />
       <Route path="/reports/team-compliance" component={WeeklyTeamCompliance} />
+      <Route path="/reports/decline-alerts" component={ComplianceDeclineAlerts} />
       <Route path="/my-tasks" component={MyTasks} />
       <Route path="/daily-tasks" component={DailyTasks} />
       <Route path="/rent-follow-ups" component={RentFollowUps} />

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { dashboardAlertSettings, dashboardTeamAlertSettings, dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYears, operationTypes, reviewerStatuses, reviews } from "../../drizzle/schema";
+import { dashboardAlertSettings, dashboardTeamAlertSettings, dailyTaskTemplates, dailyTasks, employees, employeeStatuses, fiscalYears, operationTypes, reviewerStatuses, reviews, teamComplianceDeclineAlerts, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { PERMISSIONS, requireFiscalYearAccess, requirePermission, userHasPermission } from "../rbac";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -36,6 +36,12 @@ async function canManage(user: Parameters<typeof requirePermission>[0]) {
   return user.role === "admin" || await userHasPermission(user, PERMISSIONS.DAILY_TASKS_MANAGE);
 }
 
+async function requireComplianceAlertManager(user: Parameters<typeof requirePermission>[0], fiscalYearId: number, write = false) {
+  await requirePermission(user, PERMISSIONS.REPORTS_VIEW);
+  if (!await canManage(user)) throw new TRPCError({ code: "FORBIDDEN", message: "تتطلب متابعة تنبيهات التراجع صلاحية إدارة المهام اليومية." });
+  await requireFiscalYearAccess(user, fiscalYearId, write);
+}
+
 const templateInput = z.object({
   fiscalYearId: z.number().int().positive(),
   employeeId: z.number().int().positive(),
@@ -62,6 +68,7 @@ const weeklyTeamComplianceInput = z.object({
   weekStart: dateText.optional(),
   weekEnd: dateText.optional(),
   period: z.enum(["week", "month"]).default("week"),
+  teamName: z.string().trim().min(1).max(160).optional(),
 }).refine(value => !value.weekStart || !value.weekEnd || value.weekEnd >= value.weekStart, { message: "تاريخ نهاية النطاق يجب أن يساوي أو يتجاوز تاريخ البداية." });
 
 type WeeklyTaskRow = { teamName: string | null; taskDate: Date; status: "pending" | "in_progress" | "completed" | "skipped"; notes: string | null };
@@ -111,9 +118,10 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   const previousEndExclusive = new Date(weekStart);
   const previousWeekStart = new Date(Math.max(fiscalStart.getTime(), weekStart.getTime() - periodDuration));
   const hasPreviousPeriod = previousWeekStart.getTime() < previousEndExclusive.getTime();
+  const teamFilter = input.teamName ? [eq(employees.department, input.teamName)] : [];
   const [rows, previousRows, globalSettings, teamSettings] = await Promise.all([
-    db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, weekStart), lt(dailyTasks.taskDate, endExclusive))),
-    hasPreviousPeriod ? db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, previousWeekStart), lt(dailyTasks.taskDate, previousEndExclusive))) : Promise.resolve([]),
+    db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, weekStart), lt(dailyTasks.taskDate, endExclusive), ...teamFilter)),
+    hasPreviousPeriod ? db.select({ teamName: employees.department, taskDate: dailyTasks.taskDate, status: dailyTasks.status, notes: dailyTasks.notes }).from(dailyTasks).innerJoin(employees, eq(dailyTasks.employeeId, employees.id)).where(and(eq(dailyTasks.fiscalYearId, input.fiscalYearId), gte(dailyTasks.taskDate, previousWeekStart), lt(dailyTasks.taskDate, previousEndExclusive), ...teamFilter)) : Promise.resolve([]),
     db.select({ overdueThreshold: dashboardAlertSettings.overdueThreshold }).from(dashboardAlertSettings).where(eq(dashboardAlertSettings.id, 1)).limit(1),
     db.select({ teamName: dashboardTeamAlertSettings.teamName, overdueThreshold: dashboardTeamAlertSettings.overdueThreshold }).from(dashboardTeamAlertSettings),
   ]);
@@ -123,6 +131,7 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
   return {
     fiscalYearId: input.fiscalYearId,
     period: input.period,
+    teamName: input.teamName ?? null,
     weekStart: weekStart.toISOString().slice(0, 10),
     weekEnd: new Date(endExclusive.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     previousWeekStart: hasPreviousPeriod ? previousWeekStart.toISOString().slice(0, 10) : null,
@@ -139,6 +148,39 @@ async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePerm
 }
 
 export const dailyTasksRouter = router({
+  complianceDeclineAlerts: router({
+    list: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive(), status: z.enum(["new", "acknowledged"]).optional(), limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => {
+      await requireComplianceAlertManager(ctx.user, input.fiscalYearId);
+      const db = await database();
+      const conditions = [eq(teamComplianceDeclineAlerts.fiscalYearId, input.fiscalYearId)];
+      if (input.status) conditions.push(eq(teamComplianceDeclineAlerts.status, input.status));
+      return db.select({
+        id: teamComplianceDeclineAlerts.id,
+        fiscalYearId: teamComplianceDeclineAlerts.fiscalYearId,
+        teamName: teamComplianceDeclineAlerts.teamName,
+        periodStart: teamComplianceDeclineAlerts.periodStart,
+        periodEnd: teamComplianceDeclineAlerts.periodEnd,
+        completionRate: teamComplianceDeclineAlerts.completionRate,
+        previousCompletionRate: teamComplianceDeclineAlerts.previousCompletionRate,
+        completionRateDelta: teamComplianceDeclineAlerts.completionRateDelta,
+        threshold: teamComplianceDeclineAlerts.threshold,
+        status: teamComplianceDeclineAlerts.status,
+        acknowledgementNote: teamComplianceDeclineAlerts.acknowledgementNote,
+        acknowledgedAt: teamComplianceDeclineAlerts.acknowledgedAt,
+        acknowledgedByName: users.name,
+        createdAt: teamComplianceDeclineAlerts.createdAt,
+      }).from(teamComplianceDeclineAlerts).leftJoin(users, eq(teamComplianceDeclineAlerts.acknowledgedByUserId, users.id)).where(and(...conditions)).orderBy(desc(teamComplianceDeclineAlerts.createdAt)).limit(input.limit);
+    }),
+    acknowledge: protectedProcedure.input(z.object({ id: z.number().int().positive(), note: z.string().trim().max(1000).optional() })).mutation(async ({ ctx, input }) => {
+      const db = await database();
+      const [alert] = await db.select({ fiscalYearId: teamComplianceDeclineAlerts.fiscalYearId }).from(teamComplianceDeclineAlerts).where(eq(teamComplianceDeclineAlerts.id, input.id)).limit(1);
+      if (!alert) throw new TRPCError({ code: "NOT_FOUND", message: "تنبيه التراجع غير موجود." });
+      await requireComplianceAlertManager(ctx.user, alert.fiscalYearId, true);
+      await db.update(teamComplianceDeclineAlerts).set({ status: "acknowledged", acknowledgementNote: input.note || null, acknowledgedByUserId: ctx.user.id, acknowledgedAt: new Date() }).where(eq(teamComplianceDeclineAlerts.id, input.id));
+      return { success: true };
+    }),
+  }),
+
   employees: protectedProcedure.query(async ({ ctx }) => {
     await requirePermission(ctx.user, PERMISSIONS.DAILY_TASKS_MANAGE);
     const db = await database();
