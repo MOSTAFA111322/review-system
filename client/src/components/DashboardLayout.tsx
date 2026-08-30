@@ -28,18 +28,25 @@ import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { useTheme } from "../contexts/ThemeContext";
 
 const navigation = [
-  { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/" },
-  { icon: ListChecks, label: "مهامي", path: "/my-tasks", permission: "reviews.view.assigned" },
-  { icon: ClipboardCheck, label: "المهام اليومية", path: "/daily-tasks", permission: "dailyTasks.view" },
-  { icon: FileSpreadsheet, label: "متابعة سداد الإيجارات", path: "/rent-follow-ups", permission: "rentFollowUps.view" },
-  { icon: LayoutDashboard, label: "لوحة الأداء", path: "/dashboard" },
-  { icon: Bell, label: "مركز الإشعارات", path: "/notifications" },
-  { icon: FileBarChart, label: "الخلاصة والتقارير", path: "/reports" },
-  { icon: FileBarChart, label: "التزام الفرق الأسبوعي", path: "/reports/team-compliance", permission: "reports.view" },
-  { icon: AlertTriangle, label: "تنبيهات تراجع الالتزام", path: "/reports/decline-alerts", permission: "reports.view" },
-  { icon: Settings, label: "الإعدادات", path: "/settings", permission: "settings.manage" },
-  { icon: Users, label: "المستخدمون والأدوار", path: "/users", permission: "users.manage" },
+  { icon: ClipboardCheck, label: "لوحة المراجعات", path: "/", permissions: [] },
+  { icon: ListChecks, label: "مهامي", path: "/my-tasks", permissions: ["reviews.view.assigned"] },
+  { icon: ClipboardCheck, label: "المهام اليومية", path: "/daily-tasks", permissions: ["dailyTasks.view"] },
+  { icon: FileSpreadsheet, label: "متابعة سداد الإيجارات", path: "/rent-follow-ups", permissions: ["rentFollowUps.view"] },
+  { icon: LayoutDashboard, label: "لوحة الأداء", path: "/dashboard", permissions: [] },
+  { icon: Bell, label: "مركز الإشعارات", path: "/notifications", permissions: [] },
+  { icon: FileBarChart, label: "الخلاصة والتقارير", path: "/reports", permissions: [] },
+  { icon: FileBarChart, label: "التزام الفرق الأسبوعي", path: "/reports/team-compliance", permissions: ["reports.view"] },
+  { icon: AlertTriangle, label: "تنبيهات تراجع الالتزام", path: "/reports/decline-alerts", permissions: ["reports.view", "dailyTasks.manage"] },
+  { icon: Settings, label: "الإعدادات", path: "/settings", permissions: ["settings.manage"] },
+  { icon: Users, label: "المستخدمون والأدوار", path: "/users", permissions: ["users.manage"] },
 ];
+
+type ComplianceAlertSummary = { total: number; unacknowledgedTotal: number; acknowledgedTotal: number; byTeam: Array<{ teamName: string; newCount: number; acknowledgedCount: number; total: number }> };
+
+function ComplianceAlertDashboardSummary({ summary, onOpen }: { summary: ComplianceAlertSummary; onOpen: () => void }) {
+  const pending = summary.unacknowledgedTotal;
+  return <section dir="rtl" aria-labelledby="compliance-alert-summary-title" aria-live="polite" className={`border-b px-4 py-4 md:px-7 ${pending ? "border-amber-200 bg-amber-50/80 dark:border-amber-900/60 dark:bg-amber-950/25" : "border-emerald-100 bg-emerald-50/50 dark:border-emerald-900/50 dark:bg-emerald-950/20"}`}><div className="mx-auto max-w-7xl"><div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start"><div className="flex items-start gap-3"><span className={`rounded-xl p-2.5 ${pending ? "bg-amber-500 text-white" : "bg-emerald-600 text-white"}`}><AlertTriangle className="h-5 w-5" /></span><div><h2 id="compliance-alert-summary-title" className="text-sm font-bold text-slate-900 dark:text-slate-100">ملخص تنبيهات تراجع الالتزام</h2><p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">{pending ? `يوجد ${pending} تنبيه بانتظار الإقرار الإداري ضمن السنة المالية الحالية.` : "لا توجد تنبيهات تراجع بانتظار الإقرار ضمن السنة المالية الحالية."}</p></div></div><button type="button" onClick={onOpen} className={`shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${pending ? "bg-amber-700 text-white hover:bg-amber-800 focus-visible:ring-amber-600 dark:bg-amber-500 dark:hover:bg-amber-400" : "bg-emerald-700 text-white hover:bg-emerald-800 focus-visible:ring-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-500"}`}>فتح سجل التنبيهات</button></div><div className="mt-4 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-white/80 p-3 shadow-sm dark:bg-slate-900/70"><p className="text-xs text-slate-500">بانتظار الإقرار</p><p className={`mt-1 text-xl font-bold ${pending ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>{pending}</p></div><div className="rounded-xl bg-white/80 p-3 shadow-sm dark:bg-slate-900/70"><p className="text-xs text-slate-500">تم الإقرار</p><p className="mt-1 text-xl font-bold text-emerald-700 dark:text-emerald-300">{summary.acknowledgedTotal}</p></div><div className="rounded-xl bg-white/80 p-3 shadow-sm dark:bg-slate-900/70"><p className="text-xs text-slate-500">إجمالي الوقائع</p><p className="mt-1 text-xl font-bold text-slate-800 dark:text-slate-100">{summary.total}</p></div></div>{summary.byTeam.length ? <div className="mt-4 overflow-x-auto rounded-xl border border-white/70 bg-white/75 dark:border-slate-800 dark:bg-slate-900/60"><table className="w-full min-w-[460px] text-right text-xs"><thead className="bg-white/80 text-slate-500 dark:bg-slate-900"><tr><th className="px-3 py-2.5 font-medium">الفريق</th><th className="px-3 py-2.5 font-medium">بانتظار الإقرار</th><th className="px-3 py-2.5 font-medium">تم الإقرار</th><th className="px-3 py-2.5 font-medium">الإجمالي</th></tr></thead><tbody>{summary.byTeam.map(team => <tr key={team.teamName} className="border-t border-slate-100 dark:border-slate-800"><td className="px-3 py-2.5 font-semibold text-slate-700 dark:text-slate-200">{team.teamName}</td><td className={`px-3 py-2.5 font-bold ${team.newCount ? "text-amber-700 dark:text-amber-300" : "text-slate-500"}`}>{team.newCount}</td><td className="px-3 py-2.5 text-emerald-700 dark:text-emerald-300">{team.acknowledgedCount}</td><td className="px-3 py-2.5 text-slate-700 dark:text-slate-200">{team.total}</td></tr>)}</tbody></table></div> : null}</div></section>;
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { loading, user } = useAuth();
@@ -68,6 +75,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const utils = trpc.useUtils();
   const notifications = trpc.notifications.list.useQuery({ unreadOnly: false });
   const notificationSummary = trpc.notifications.summary.useQuery();
+  const fiscalYears = trpc.fiscalYears.list.useQuery();
   const markNotificationRead = trpc.notifications.markRead.useMutation({ onSuccess: () => { utils.notifications.list.invalidate(); utils.notifications.summary.invalidate(); } });
   const unreadCount = notifications.data?.filter(item => !item.readAt).length ?? 0;
   const criticalUnread = notificationSummary.data?.criticalUnread ?? 0;
@@ -75,7 +83,11 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const permissions = user?.permissions ?? [];
   const hasPermission = (permission?: string) => !permission || permissions.includes("*") || permissions.includes(permission);
-  const visibleNavigation = navigation.filter(item => hasPermission(item.permission));
+  const canManageComplianceAlerts = hasPermission("reports.view") && hasPermission("dailyTasks.manage");
+  const currentFiscalYearId = fiscalYears.data?.find(year => year.isCurrent)?.id ?? fiscalYears.data?.[0]?.id;
+  const complianceAlertSummary = trpc.dailyTasks.complianceDeclineAlerts.summary.useQuery({ fiscalYearId: currentFiscalYearId ?? 0 }, { enabled: canManageComplianceAlerts && Boolean(currentFiscalYearId), refetchInterval: 60_000, refetchIntervalInBackground: false });
+  const unacknowledgedComplianceAlerts = complianceAlertSummary.data?.unacknowledgedTotal ?? 0;
+  const visibleNavigation = navigation.filter(item => item.permissions.every(hasPermission));
   const activeItem = visibleNavigation.find(item => item.path === location) ?? visibleNavigation[0];
 
   return (
@@ -98,7 +110,7 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
                 <SidebarMenuItem key={item.path}>
                   <SidebarMenuButton isActive={active} tooltip={item.label} onClick={() => setLocation(item.path)} className="h-11 rounded-xl px-3 text-slate-600 data-[active=true]:bg-blue-50 data-[active=true]:font-semibold data-[active=true]:text-blue-800 hover:bg-slate-50">
                     <item.icon className={`h-[18px] w-[18px] ${active ? "text-blue-700" : ""}`} />
-                    <span>{item.label}</span>
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>{item.path === "/reports/decline-alerts" && unacknowledgedComplianceAlerts ? <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white group-data-[collapsible=icon]:hidden">{unacknowledgedComplianceAlerts > 99 ? "99+" : unacknowledgedComplianceAlerts}</span> : null}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );
@@ -135,9 +147,11 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
             <button onClick={toggleTheme} aria-label={theme === "dark" ? "تفعيل الوضع النهاري" : "تفعيل الوضع الليلي"} title={theme === "dark" ? "الوضع النهاري" : "الوضع الليلي"} className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
               {theme === "dark" ? <Sun className="h-[18px] w-[18px] text-amber-300" /> : <Moon className="h-[18px] w-[18px]" />}
             </button>
+            {canManageComplianceAlerts && unacknowledgedComplianceAlerts ? <button type="button" onClick={() => setLocation("/reports/decline-alerts")} aria-label={`لديك ${unacknowledgedComplianceAlerts} تنبيهات تراجع بانتظار الإقرار`} title="تنبيهات تراجع بانتظار الإقرار" className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-amber-300 bg-amber-50 text-amber-700 shadow-sm transition-colors hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"><AlertTriangle className="h-[18px] w-[18px]" /><span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-600 px-1 text-[9px] font-bold text-white">{unacknowledgedComplianceAlerts > 9 ? "9+" : unacknowledgedComplianceAlerts}</span></button> : null}
             <DropdownMenu><DropdownMenuTrigger asChild><button aria-label={criticalUnread ? `لديك ${criticalUnread} إشعارات حرجة غير مقروءة` : "الإشعارات"} className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50"><Bell className={`h-[18px] w-[18px] ${criticalUnread ? "text-red-600" : ""}`} />{unreadCount ? <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-700 px-1 text-[9px] font-bold text-white">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}{criticalUnread ? <span className="absolute -bottom-1 -left-1 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-[#f7f9fc] bg-red-600 px-1 text-[9px] font-bold text-white" title={`${criticalUnread} عاجلة غير مقروءة`}>{criticalUnread > 9 ? "9+" : criticalUnread}</span> : null}</button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-80 p-2 text-right"><div dir="rtl"><p className="px-2 py-2 text-sm font-bold text-slate-800">الإشعارات{criticalUnread ? <span className="mr-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800">{criticalUnread} عاجلة</span> : null}</p>{notifications.isLoading ? <p className="px-2 py-3 text-sm text-slate-500">جارٍ التحميل…</p> : notifications.data?.length ? notifications.data.slice(0, 6).map(item => <DropdownMenuItem key={item.id} onSelect={() => { if (!item.readAt) markNotificationRead.mutate({ id: item.id }); if (item.link) setLocation(item.link); }} className={`block cursor-pointer whitespace-normal rounded-lg px-2 py-2.5 ${item.readAt ? "opacity-70" : "bg-blue-50/70"}`}><p className="text-sm font-semibold text-slate-700">{item.title}</p>{item.body ? <p className="mt-1 text-xs leading-5 text-slate-500">{item.body}</p> : null}</DropdownMenuItem>) : <p className="px-2 py-4 text-sm text-slate-500">لا توجد إشعارات جديدة.</p>}<button type="button" onClick={() => setLocation("/notifications")} className="mt-1 w-full rounded-lg px-2 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">عرض كل الإشعارات</button></div></DropdownMenuContent></DropdownMenu>
           </div>
         </header>
+        {location === "/dashboard" && canManageComplianceAlerts && complianceAlertSummary.data ? <ComplianceAlertDashboardSummary summary={complianceAlertSummary.data} onOpen={() => setLocation("/reports/decline-alerts")} /> : null}
         <main className="min-h-[calc(100vh-5rem)] p-4 md:p-7">{children}</main>
       </SidebarInset>
     </SidebarProvider>

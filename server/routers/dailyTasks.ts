@@ -95,6 +95,28 @@ export function buildWeeklyTeamCompliance(rows: WeeklyTaskRow[], defaultThreshol
     .sort((a, b) => Number(b.exceedsThreshold) - Number(a.exceedsThreshold) || b.overdue - a.overdue || b.unupdated - a.unupdated || a.teamName.localeCompare(b.teamName, "ar"));
 }
 
+type ComplianceDeclineAlertSummaryRow = { teamName: string; status: "new" | "acknowledged" };
+
+/** تجميع محدود بالسنة المالية؛ يبيّن حالة المتابعة ولا يعيد تفاصيل التنبيهات إلى لوحة المعلومات. */
+export function buildComplianceDeclineAlertSummary(rows: ComplianceDeclineAlertSummaryRow[]) {
+  const teams = new Map<string, { teamName: string; newCount: number; acknowledgedCount: number }>();
+  for (const row of rows) {
+    const current = teams.get(row.teamName) ?? { teamName: row.teamName, newCount: 0, acknowledgedCount: 0 };
+    if (row.status === "new") current.newCount += 1;
+    else current.acknowledgedCount += 1;
+    teams.set(row.teamName, current);
+  }
+  const byTeam = Array.from(teams.values())
+    .map(team => ({ ...team, total: team.newCount + team.acknowledgedCount }))
+    .sort((a, b) => b.newCount - a.newCount || b.total - a.total || a.teamName.localeCompare(b.teamName, "ar"));
+  return {
+    total: rows.length,
+    unacknowledgedTotal: byTeam.reduce((total, team) => total + team.newCount, 0),
+    acknowledgedTotal: byTeam.reduce((total, team) => total + team.acknowledgedCount, 0),
+    byTeam,
+  };
+}
+
 async function getWeeklyTeamComplianceReport(user: Parameters<typeof requirePermission>[0], input: z.infer<typeof weeklyTeamComplianceInput>) {
   await requireFiscalYearAccess(user, input.fiscalYearId);
   const db = await database();
@@ -170,6 +192,14 @@ export const dailyTasksRouter = router({
         acknowledgedByName: users.name,
         createdAt: teamComplianceDeclineAlerts.createdAt,
       }).from(teamComplianceDeclineAlerts).leftJoin(users, eq(teamComplianceDeclineAlerts.acknowledgedByUserId, users.id)).where(and(...conditions)).orderBy(desc(teamComplianceDeclineAlerts.createdAt)).limit(input.limit);
+    }),
+    summary: protectedProcedure.input(z.object({ fiscalYearId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+      await requireComplianceAlertManager(ctx.user, input.fiscalYearId);
+      const db = await database();
+      const rows = await db.select({ teamName: teamComplianceDeclineAlerts.teamName, status: teamComplianceDeclineAlerts.status })
+        .from(teamComplianceDeclineAlerts)
+        .where(eq(teamComplianceDeclineAlerts.fiscalYearId, input.fiscalYearId));
+      return buildComplianceDeclineAlertSummary(rows);
     }),
     acknowledge: protectedProcedure.input(z.object({ id: z.number().int().positive(), note: z.string().trim().max(1000).optional() })).mutation(async ({ ctx, input }) => {
       const db = await database();

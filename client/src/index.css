@@ -303,11 +303,7 @@
     padding: 0 !important;
   }
 
-  main > *:not(:last-child) {
-    display: none !important;
-  }
-
-  .print\\:flex {
+  .print\:flex {
     display: flex !important;
   }
 
@@ -380,7 +376,12 @@
   .daily-tasks-print-root .print-active select,
   .daily-tasks-print-root .print-active textarea,
   .reports-print-root .print-active button,
-  .daily-tasks-print-root .print-active button {
+  .reports-print-root .print-active button {
+    display: none !important;
+  }
+
+  [data-sonner-toaster],
+  [data-sonner-toast] {
     display: none !important;
   }
 }

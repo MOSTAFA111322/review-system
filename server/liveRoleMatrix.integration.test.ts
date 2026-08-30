@@ -85,6 +85,8 @@ describeWithLiveData("live API role matrix — temporary identities are removed"
       await expect(manager.reviews.list({ ...listInput, fiscalYearId: isolationYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.reviews.formOptions({ fiscalYearId: openYear.id })).resolves.toMatchObject({ operationTypes: expect.any(Array) });
       await expect(manager.reviews.editOptions({ id: actualReview.id })).resolves.toMatchObject({ fiscalYearId: openYear.id, operationTypes: expect.any(Array), employees: expect.any(Array) });
+      await expect(appRouter.createCaller(contextFor(owner)).dailyTasks.complianceDeclineAlerts.summary({ fiscalYearId: openYear.id })).resolves.toMatchObject({ total: expect.any(Number), unacknowledgedTotal: expect.any(Number), acknowledgedTotal: expect.any(Number), byTeam: expect.any(Array) });
+      await expect(manager.dailyTasks.complianceDeclineAlerts.summary({ fiscalYearId: openYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(employee.reviews.list(listInput)).resolves.toMatchObject({ items: [], total: 0 });
       await expect(employee.reviews.get({ id: actualReview.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(manager.users.list()).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -92,6 +94,8 @@ describeWithLiveData("live API role matrix — temporary identities are removed"
       await expect(employee.reviews.formOptions({ fiscalYearId: openYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(employee.reviews.editOptions({ id: actualReview.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(reviewer.reviews.changeStatus({ id: actualReview.id, side: "employee", toStatusId: 2_147_483_647 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(reviewer.dailyTasks.complianceDeclineAlerts.summary({ fiscalYearId: openYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(employee.dailyTasks.complianceDeclineAlerts.summary({ fiscalYearId: openYear.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
     } finally {
       if (createdIds.length) {
         await db.delete(userFiscalYears).where(inArray(userFiscalYears.userId, createdIds));

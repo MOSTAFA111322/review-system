@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildWeeklyTeamCompliance, dailyTasksRouter, matchesRecurrence } from "./routers/dailyTasks";
+import { buildComplianceDeclineAlertSummary, buildWeeklyTeamCompliance, dailyTasksRouter, matchesRecurrence } from "./routers/dailyTasks";
 
 describe("daily tasks import contract", () => {
   it("يسجل إجراءات الموظفين والاستيراد والتقرير الموحد", () => {
@@ -194,5 +194,35 @@ describe("daily tasks import contract", () => {
     expect(alertUi).toContain("ملاحظة متابعة سريعة");
     expect(alertUi).toContain("trpc.dailyTasks.complianceDeclineAlerts.list.useQuery");
     expect(alertUi).toContain("trpc.dailyTasks.complianceDeclineAlerts.acknowledge.useMutation");
+  });
+
+  it("يلخص تنبيهات التراجع حسب الفريق وحالة الإقرار دون خلط الفرق", () => {
+    expect(buildComplianceDeclineAlertSummary([
+      { teamName: "فريق المراجعة", status: "new" },
+      { teamName: "فريق المراجعة", status: "acknowledged" },
+      { teamName: "فريق المحاسبة", status: "new" },
+      { teamName: "فريق المراجعة", status: "new" },
+    ])).toEqual({
+      total: 4,
+      unacknowledgedTotal: 3,
+      acknowledgedTotal: 1,
+      byTeam: [
+        { teamName: "فريق المراجعة", newCount: 2, acknowledgedCount: 1, total: 3 },
+        { teamName: "فريق المحاسبة", newCount: 1, acknowledgedCount: 0, total: 1 },
+      ],
+    });
+  });
+
+  it("يعرض شارة وملخص التراجع فقط لحامل صلاحيتي التقارير وإدارة المهام", () => {
+    const source = readFileSync(new URL("./routers/dailyTasks.ts", import.meta.url), "utf8");
+    expect(source).toContain("summary: protectedProcedure.input");
+    expect(source).toContain("buildComplianceDeclineAlertSummary(rows)");
+    expect(source).toContain("requireComplianceAlertManager(ctx.user, input.fiscalYearId)");
+    const shell = readFileSync(new URL("../client/src/components/DashboardLayout.tsx", import.meta.url), "utf8");
+    expect(shell).toContain('permissions: ["reports.view", "dailyTasks.manage"]');
+    expect(shell).toContain("canManageComplianceAlerts");
+    expect(shell).toContain("complianceDeclineAlerts.summary.useQuery");
+    expect(shell).toContain("ملخص تنبيهات تراجع الالتزام");
+    expect(shell).toContain("/reports/decline-alerts");
   });
 });

@@ -142,6 +142,7 @@ export default function WeeklyTeamCompliance() {
       <Field label="نهاية النطاق" hint="اختر البداية والنهاية لتقرير مخصص قبل التصدير."><input aria-label="نهاية نطاق التقرير" type="date" value={weekEnd} min={weekStart || undefined} onChange={event => setWeekEnd(event.target.value)} className="field-select" /></Field>
       <div className="flex items-end"><Button variant="outline" className="w-full" onClick={() => { setWeekStart(""); setWeekEnd(""); setTeamName(""); }}>إعادة الضبط</Button></div>
     </CardContent></Card>
+    {report.data ? <div className="hidden print:block print:pb-5"><h1 className="text-xl font-bold text-black">تقرير التزام الفرق {periodLabel}</h1><p className="mt-1 text-sm text-slate-700">النطاق من {report.data.weekStart} إلى {report.data.weekEnd}{teamName ? `؛ الفريق: ${teamName}` : "؛ جميع الفرق"}.</p></div> : null}
     {report.isLoading ? <Card className="rounded-2xl"><CardContent className="p-10 text-center text-sm text-slate-500">جارٍ إعداد تقرير التزام الفرق…</CardContent></Card> : report.isError ? <DeniedReport /> : report.data ? <ReportData data={report.data} period={period} teamName={teamName} /> : null}
   </section></DashboardLayout>;
 }
